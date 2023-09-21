@@ -9,54 +9,41 @@
 			 d:DesignHeight="300"
 			 d:DesignWidth="400">
 
-	<controls:SampleControl SampleDescription="Animated Border below is within a transformed view, it should still animate outside its untransformed bounds.">
-		<controls:SampleControl.SampleContent>
-			<DataTemplate>
-				<StackPanel Margin="50,0,0,0"
-							Background="LightGray">
-					<Slider x:Name="YSlider"
-							Minimum="0"
-							Maximum="100"
-							Value="10"
-							Width="200" />
-					<Button Content="Dummy"
-							Margin="20" />
-					<CheckBox x:Name="IsActiveCheckBox"
-							  Margin="20"
-							  IsChecked="True" />
-					<Border HorizontalAlignment="Left"
-							VerticalAlignment="Top">
-						<Border.RenderTransform>
-							<TranslateTransform X="{Binding ElementName=YSlider, Path=Value}" />
-						</Border.RenderTransform>
-						<Border HorizontalAlignment="Left"
-								VerticalAlignment="Top">
-							<local:AnimatedContentControl IsAnimating="{Binding ElementName=IsActiveCheckBox, Path=IsChecked}">
-								<Border x:Name="OpacityBorder"
-										Margin="40,20,40,20"
-										Width="20"
-										Height="20"
-										Background="Purple">
-									<VisualStateManager.VisualStateGroups>
-										<VisualStateGroup x:Name="Animation">
-											<VisualState x:Name="Animating">
-												<Storyboard>
-													<DoubleAnimation Storyboard.TargetName="OpacityBorder"
-																	 Storyboard.TargetProperty="Opacity"
-																	 From="0"
-																	 To="1"
-																	 Duration="0:0:05"
-																	 RepeatBehavior="Forever" />
-												</Storyboard>
-											</VisualState>
-										</VisualStateGroup>
-									</VisualStateManager.VisualStateGroups>
-								</Border>
-							</local:AnimatedContentControl>
-						</Border>
-					</Border>
-				</StackPanel>
-			</DataTemplate>
-		</controls:SampleControl.SampleContent>
-	</controls:SampleControl>
+	<StackPanel HorizontalAlignment="Center"
+	            VerticalAlignment="Center"
+	            Spacing="20">
+
+		<Button Background="{ThemeResource MyBrush}"
+		        Content="Should Be Red"
+		        Width="200"
+		        Height="200" />
+
+		<Border>
+			<Border.Resources>
+				<SolidColorBrush x:Key="MyBrush" Color="Blue" />
+			</Border.Resources>
+			<Button Background="{ThemeResource MyBrush}"
+			        Width="200"
+			        Content="Should Be Blue"
+			        Height="200" />
+		</Border>
+
+		<Border>
+			<Border.Resources>
+				<ResourceDictionary>
+					<ResourceDictionary.MergedDictionaries>
+						<ResourceDictionary Source="ms-appx:///Assets/Styles/MyBrush.xaml">
+							<ResourceDictionary.MergedDictionaries>
+								<ResourceDictionary Source="ms-appx:///Assets/Styles/MyColorGreen.xaml" />
+							</ResourceDictionary.MergedDictionaries>
+						</ResourceDictionary>
+					</ResourceDictionary.MergedDictionaries>
+				</ResourceDictionary>
+			</Border.Resources>
+			<Button Background="{ThemeResource MyBrush}"
+			        Width="200"
+			        Content="Should Be Green"
+			        Height="200" />
+		</Border>
+	</StackPanel>
 </UserControl>

@@ -9124,6 +9124,9 @@
     <Content Include="$(MSBuildThisFileDirectory)Assets\RemoteFonts\antikytheraoutlineital.woff" />
     <Content Include="$(MSBuildThisFileDirectory)Assets\RemoteFonts\GALACTIC VANGUARDIAN NCV.woff" />
     <Content Include="$(MSBuildThisFileDirectory)Assets\square100.png" />
+    <Content Include="$(MSBuildThisFileDirectory)Assets\Styles\MyBrush.xaml" />
+    <Content Include="$(MSBuildThisFileDirectory)Assets\Styles\MyColorGreen.xaml" />
+    <Content Include="$(MSBuildThisFileDirectory)Assets\Styles\MyColorRed.xaml" />
     <Content Include="$(MSBuildThisFileDirectory)Assets\testimage_exif_rotated.jpg" />
     <Content Include="$(MSBuildThisFileDirectory)Assets\test_image_200_200.png" />
     <Content Include="$(MSBuildThisFileDirectory)Assets\theme-dark\ThemeTestImage.png" />
