@@ -507,7 +507,7 @@ namespace Uno.UI
 			/// Determines if a native (Gtk/Wpf) TextBox overlay should be used on the skia targets instead of the
 			/// Uno skia-based TextBox implementation.
 			/// </summary>
-			public static bool UseOverlayOnSkia { get; set; } = true;
+			public static bool UseOverlayOnSkia { get; set; }
 
 #if __ANDROID__
 			/// <summary>

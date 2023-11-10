@@ -6,6 +6,7 @@ using Windows.Foundation;
 using Windows.UI.Text;
 using Windows.UI.Xaml.Documents.TextFormatting;
 using Windows.UI.Xaml.Media;
+using Uno.Extensions;
 using Uno.Foundation.Logging;
 using Uno.UI.Composition;
 
@@ -46,16 +47,62 @@ namespace Windows.UI.Xaml.Documents
 		private (bool wentThroughMeasure, bool wentThroughDraw) _drawingValid;
 		private (SelectionDetails? selection, bool caretAtEndOfSelection, bool renderSelection, bool renderCaret) _lastDrawingState;
 
-		// these should only be used by TextBox.
-		internal SelectionDetails? Selection { get; set; }
-		internal bool CaretAtEndOfSelection { get; set; }
-		internal bool RenderSelection { get; set; }
-		internal bool RenderCaret { get; set; }
+		private SelectionDetails? _selection;
+		private bool _renderSelection;
+		private bool _caretAtEndOfSelection;
+		private bool _renderCaret;
+		internal bool CaretAtEndOfSelection
+		{
+			get => _caretAtEndOfSelection;
+			set
+			{
+				_caretAtEndOfSelection = value;
+				((IBlock)_collection.GetParent()).Invalidate(false);
+			}
+		}
+		internal bool RenderSelection
+		{
+			get => _renderSelection;
+			set
+			{
+				_renderSelection = value;
+				((IBlock)_collection.GetParent()).Invalidate(false);
+			}
+		}
+		internal bool RenderCaret
+		{
+			get => _renderCaret;
+			set
+			{
+				_renderCaret = value;
+				((IBlock)_collection.GetParent()).Invalidate(false);
+			}
+		}
+
+		/// <summary>
+		/// Depending on the event listeners, one might want to send the drawing events
+		/// every time we <see cref="Draw"/>. In the case of a TextBox, we need a layout
+		/// cycle every time the events fire, so we only fire when something changes.
+		/// In the case of a TextBlock with selection, we directly draw on the SKCanvas
+		/// so we need the events to fire everytime we redraw.
+		/// </summary>
+		internal bool FireDrawingEventsOnEveryRedraw { get; set; }
 
 		internal event Action DrawingStarted;
-		internal event Action<Rect> SelectionFound;
+		internal event Action<(Rect rect, SKCanvas canvas)> SelectionFound;
 		internal event Action DrawingFinished;
 		internal event Action<Rect> CaretFound;
+
+		internal (int start, int end) Selection
+		{
+			set
+			{
+				// TODO: we're passing twice to look for the start and end lines. Could easily be done in 1 pass
+				var startLine = GetRenderLineAt(GetRectForTextBlockIndex(value.start).GetCenter().Y, true)?.index ?? 0;
+				var endLine = GetRenderLineAt(GetRectForTextBlockIndex(value.end).GetCenter().Y, true)?.index ?? 0;
+				_selection = new SelectionDetails(startLine, value.start, endLine, value.end);
+			}
+		}
 
 		/// <summary>
 		/// Measures a block-level inline collection, i.e. one that belongs to a TextBlock (or Paragraph, in the future).
@@ -334,8 +381,9 @@ namespace Windows.UI.Xaml.Documents
 		/// </summary>
 		internal void Draw(in DrawingSession session)
 		{
-			var newDrawingState = (Selection, CaretAtEndOfSelection, RenderSelection, RenderCaret);
-			var fireEvents = _drawingValid is not { wentThroughDraw: true, wentThroughMeasure: true } && _lastDrawingState != newDrawingState;
+			var newDrawingState = (_selection, CaretAtEndOfSelection, RenderSelection, RenderCaret);
+			var somethingChanged = _drawingValid is not { wentThroughDraw: true, wentThroughMeasure: true } && !_lastDrawingState.Equals(newDrawingState);
+			var fireEvents = FireDrawingEventsOnEveryRedraw || somethingChanged;
 			_drawingValid.wentThroughDraw = true;
 			_lastDrawingState = newDrawingState;
 
@@ -434,9 +482,78 @@ namespace Windows.UI.Xaml.Documents
 						}
 					}
 
-					var run = _textBlobBuilder.AllocatePositionedRunFast(fontInfo.SKFont, segmentSpan.GlyphsLength);
-					var glyphs = run.GetGlyphSpan(segmentSpan.GlyphsLength);
-					var positions = run.GetPositionSpan(segmentSpan.GlyphsLength);
+					UnoCombinedSKRunBufferInternal.CombinedSpanView<ushort> glyphs;
+					UnoCombinedSKRunBufferInternal.CombinedSpanView<SKPoint> positions;
+
+					UnoSKRunBufferInternal run1;
+					UnoSKRunBufferInternal run2;
+					UnoSKRunBufferInternal run3;
+					{
+						if (RenderSelection && _selection is { } bg && bg.StartLine <= lineIndex && lineIndex <= bg.EndLine)
+						{
+							var spanStartingIndex = characterCountSoFar;
+							int startOfSelection;
+							int endOfSelection;
+
+							if (bg.StartIndex < spanStartingIndex)
+							{
+								// the selection starts from a previous span, so this span is selected from the very beginning
+								startOfSelection = 0;
+							}
+							else if (bg.StartIndex - spanStartingIndex < segmentSpan.GlyphsLength)
+							{
+								// part or all of this span is selected
+								startOfSelection = bg.StartIndex - spanStartingIndex;
+							}
+							else
+							{
+								// this span is not a part of the selection
+								startOfSelection = segmentSpan.GlyphsLength;
+							}
+
+							if (bg.EndIndex - spanStartingIndex < 0)
+							{
+								// this span is not a part of the selection
+								endOfSelection = 0;
+							}
+							else if (bg.EndIndex - spanStartingIndex < segmentSpan.GlyphsLength)
+							{
+								// part or all of this span is selected
+								endOfSelection = bg.EndIndex - spanStartingIndex;
+							}
+							else
+							{
+								// the selection ends after this span, so this span is selected to the very end
+								endOfSelection = segmentSpan.GlyphsLength;
+							}
+
+							run1 = _textBlobBuilder.AllocatePositionedRunFast(fontInfo.SKFont, startOfSelection);
+							run2 = _textBlobBuilder.AllocatePositionedRunFast(fontInfo.SKFont, endOfSelection - startOfSelection);
+							run3 = _textBlobBuilder.AllocatePositionedRunFast(fontInfo.SKFont, segmentSpan.GlyphsLength - endOfSelection);
+
+							var run = new UnoCombinedSKRunBufferInternal(
+								run1, startOfSelection,
+								run2, endOfSelection - startOfSelection,
+								run3, segmentSpan.GlyphsLength - endOfSelection);
+
+							glyphs = run.GetGlyphSpan();
+							positions = run.GetPositionSpan();
+						}
+						else
+						{
+							run1 = _textBlobBuilder.AllocatePositionedRunFast(fontInfo.SKFont, segmentSpan.GlyphsLength);
+							// run2 = _textBlobBuilder.AllocatePositionedRunFast(fontInfo.SKFont, 0);
+							// run3 = _textBlobBuilder.AllocatePositionedRunFast(fontInfo.SKFont, 0);
+
+							var run = new UnoCombinedSKRunBufferInternal(
+								run1, segmentSpan.GlyphsLength,
+								default, 0,
+								default, 0);
+
+							glyphs = run.GetGlyphSpan();
+							positions = run.GetPositionSpan();
+						}
+					}
 
 					if (segment.Direction == FlowDirection.LeftToRight)
 					{
@@ -485,7 +602,7 @@ namespace Windows.UI.Xaml.Documents
 						}
 					}
 
-					HandleSelection(lineIndex, characterCountSoFar, positions, x, justifySpaceOffset, segmentSpan, segment, fontInfo, fireEvents, y, line);
+					HandleSelection(lineIndex, characterCountSoFar, positions, x, justifySpaceOffset, segmentSpan, segment, fontInfo, fireEvents, y, line, canvas);
 
 					if (glyphs.Length != 0)
 					{
@@ -514,9 +631,9 @@ namespace Windows.UI.Xaml.Documents
 			}
 		}
 
-		private void HandleSelection(int lineIndex, int characterCountSoFar, Span<SKPoint> positions, float x, float justifySpaceOffset, RenderSegmentSpan segmentSpan, Segment segment, FontDetails fontInfo, bool fireEvents, float y, RenderLine line)
+		private void HandleSelection(int lineIndex, int characterCountSoFar, UnoCombinedSKRunBufferInternal.CombinedSpanView<SKPoint> positions, float x, float justifySpaceOffset, RenderSegmentSpan segmentSpan, Segment segment, FontDetails fontInfo, bool fireEvents, float y, RenderLine line, SKCanvas canvas)
 		{
-			if (RenderSelection && Selection is { } bg && bg.StartLine <= lineIndex && lineIndex <= bg.EndLine)
+			if (RenderSelection && _selection is { } bg && bg.StartLine <= lineIndex && lineIndex <= bg.EndLine)
 			{
 				var spanStartingIndex = characterCountSoFar;
 
@@ -565,15 +682,15 @@ namespace Windows.UI.Xaml.Documents
 
 				if (Math.Abs(left - right) > 0.01 && fireEvents)
 				{
-					SelectionFound?.Invoke(new Rect(new Point(left, y - line.Height), new Point(right, y)));
+					SelectionFound?.Invoke((new Rect(new Point(left, y - line.Height), new Point(right, y)), canvas));
 				}
 			}
 		}
 
-		private void HandleCaret(int characterCountSoFar, int lineIndex, RenderSegmentSpan segmentSpan, Span<SKPoint> positions, float x, float justifySpaceOffset, bool fireEvents, float y, RenderLine line)
+		private void HandleCaret(int characterCountSoFar, int lineIndex, RenderSegmentSpan segmentSpan, UnoCombinedSKRunBufferInternal.CombinedSpanView<SKPoint> positions, float x, float justifySpaceOffset, bool fireEvents, float y, RenderLine line)
 		{
 			var spanStartingIndex = characterCountSoFar;
-			if (RenderCaret && Selection is { } selection)
+			if (RenderCaret && _selection is { } selection)
 			{
 				var (l, i) = CaretAtEndOfSelection ? (selection.EndLine, selection.EndIndex) : (selection.StartLine, selection.StartIndex);
 
@@ -618,14 +735,18 @@ namespace Windows.UI.Xaml.Documents
 				.TakeWhile(l => l != line) // all previous lines
 				.Sum(currentLine => currentLine.SegmentSpans.Sum(GlyphsLengthWithCR)); // all characters in line
 
-			var (span, x) = GetRenderSegmentSpanAt(p, true)!.Value;
+			var (span, x) = GetRenderSegmentSpanAt(p, true)!.Value; // never null because we already found a line
 
 			characterCount += line.SegmentSpans
 				.TakeWhile(s => !s.Equals(span)) // all previous spans in line
 				.Sum(GlyphsLengthWithCR); // all characters in span
 
 			var segment = span.Segment;
-			var run = (Run)segment.Inline;
+			if (segment.Inline is not Run run)
+			{
+				return characterCount;
+			}
+
 			var characterSpacing = (float)run.FontSize * run.CharacterSpacing / 1000;
 
 			// The rest of the function uses GlyphsLength and not FullGlyphsLength as we can only really find a rendered glyph with a pointer.
@@ -810,6 +931,21 @@ namespace Windows.UI.Xaml.Documents
 			}
 		}
 
-		internal record SelectionDetails(int StartLine, int StartIndex, int EndLine, int EndIndex);
+		private record SelectionDetails(int StartLine, int StartIndex, int EndLine, int EndIndex)
+		{
+			public virtual bool Equals(SelectionDetails? other)
+			{
+				if (ReferenceEquals(null, other))
+				{
+					return false;
+				}
+				if (ReferenceEquals(this, other))
+				{
+					return true;
+				}
+				return StartLine == other.StartLine && StartIndex == other.StartIndex && EndLine == other.EndLine && EndIndex == other.EndIndex;
+			}
+			public override int GetHashCode() => HashCode.Combine(StartLine, StartIndex, EndLine, EndIndex);
+		};
 	}
 }

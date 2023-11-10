@@ -21,5 +21,10 @@ namespace Windows.UI.Xaml.Controls
 
 			return rect;
 		}
+
+		public TextBlock(): base()
+		{
+			_hyperlinks.CollectionChanged += HyperlinksOnCollectionChanged;
+		}
 	}
 }

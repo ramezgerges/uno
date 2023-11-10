@@ -45,6 +45,7 @@ namespace Windows.UI.Xaml.Controls
 			OnIsTextSelectionEnabledChangedPartial();
 			InitializeDefaultValues();
 
+			_hyperlinks.CollectionChanged += HyperlinksOnCollectionChanged;
 		}
 
 		/// <summary>

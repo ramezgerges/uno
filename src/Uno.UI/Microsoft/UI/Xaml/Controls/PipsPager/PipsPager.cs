@@ -326,11 +326,14 @@ public partial class PipsPager : Control
 		var scrollViewer = m_pipsPagerScrollViewer;
 		if (scrollViewer != null)
 		{
+			scrollViewer.HorizontalScrollMode = ScrollMode.Enabled;
+			scrollViewer.HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden;
 			if (Orientation == Orientation.Horizontal)
 			{
 				var scrollViewerWidth = CalculateScrollViewerSize(m_defaultPipSize.Width, m_selectedPipSize.Width, NumberOfPages, MaxVisiblePips);
+				// var scrollViewerWidth = CalculateScrollViewerSize(m_defaultPipSize.Width, m_selectedPipSize.Width, NumberOfPages, 7);
 				scrollViewer.MaxWidth = scrollViewerWidth;
-				scrollViewer.MaxHeight = Math.Max(m_defaultPipSize.Height, m_selectedPipSize.Height);
+				scrollViewer.MaxHeight = Math.Max(m_defaultPipSize.Height, m_selectedPipSize.Height) * 3;
 			}
 			else
 			{

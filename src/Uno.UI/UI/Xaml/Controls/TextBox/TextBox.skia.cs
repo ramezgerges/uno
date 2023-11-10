@@ -224,8 +224,9 @@ public partial class TextBox
 						_cachedRects.RemoveRange(_usedRects, _cachedRects.Count - _usedRects);
 					};
 
-					inlines.SelectionFound += rect =>
+					inlines.SelectionFound += t =>
 					{
+						var rect = t.rect;
 						if (_cachedRects.Count <= _usedRects)
 						{
 							_cachedRects.Add(new Rectangle());
@@ -318,13 +319,10 @@ public partial class TextBox
 	{
 		if (IsSkiaTextBox && TextBoxView?.DisplayBlock.Inlines is { } inlines)
 		{
-			var startLine = inlines.GetRenderLineAt(inlines.GetRectForTextBlockIndex(SelectionStart).GetCenter().Y, true)?.index ?? 0;
-			var endLine = inlines.GetRenderLineAt(inlines.GetRectForTextBlockIndex(SelectionStart + SelectionLength).GetCenter().Y, true)?.index ?? 0;
-			inlines.Selection = new InlineCollection.SelectionDetails(startLine, SelectionStart, endLine, SelectionStart + SelectionLength);
+			inlines.Selection = (SelectionStart, SelectionStart + SelectionLength);
 			inlines.RenderSelection = FocusState != FocusState.Unfocused || (_contextMenu?.IsOpen ?? false);
 			inlines.RenderCaret = inlines.RenderSelection && _showCaret && !FeatureConfiguration.TextBox.HideCaret && !IsReadOnly && _selection.length == 0;
 			inlines.CaretAtEndOfSelection = !_selectionEndsAtTheStart;
-			TextBoxView?.DisplayBlock.InvalidateInlines(true);
 		}
 	}
 

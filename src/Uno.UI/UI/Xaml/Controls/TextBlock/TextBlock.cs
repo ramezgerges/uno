@@ -46,6 +46,20 @@ namespace Windows.UI.Xaml.Controls
 
 		private Run _reusableRun;
 		private bool _skipInlinesChangedTextSetter;
+		private bool _subscribeToPointerEvents;
+		private bool _isPressed;
+		private (int start, int end) Selection
+		{
+			get => _selection;
+			set
+			{
+				_selection = value;
+#if __SKIA__
+				Inlines.Selection = (Math.Min(value.start, value.end), Math.Max(value.start, value.end));
+				InvalidateInlines(false);
+#endif
+			}
+		}
 
 #if !UNO_REFERENCE_API
 		public TextBlock()
@@ -93,6 +107,10 @@ namespace Windows.UI.Xaml.Controls
 				{
 					_inlines = new InlineCollection(this);
 					UpdateInlines(Text);
+
+#if __SKIA__
+					SetupInlines();
+#endif
 				}
 
 				return _inlines;
@@ -807,7 +825,7 @@ namespace Windows.UI.Xaml.Controls
 #else
 		private static readonly PointerEventHandler OnPointerPressed = (object sender, PointerRoutedEventArgs e) =>
 		{
-			if (sender is not TextBlock { HasHyperlink: true } that)
+			if (sender is not TextBlock that)
 			{
 				return;
 			}
@@ -818,26 +836,41 @@ namespace Windows.UI.Xaml.Controls
 				return;
 			}
 
-			var hyperlink = that.FindHyperlinkAt(point.Position);
-			if (hyperlink is null)
-			{
-				return;
-			}
+			that._isPressed = true;
+			var index = that.Inlines.GetIndexForTextBlock(point.Position, false);
+			that.Selection = (index, index);
+			Console.WriteLine($"Selection {that.Selection.start}:{that.Selection.end}");
 
-			if (!that.CapturePointer(e.Pointer))
+			if (that.FindHyperlinkAt(point.Position) is Hyperlink hyperlink)
 			{
-				return;
-			}
+				if (!that.CapturePointer(e.Pointer))
+				{
+					return;
+				}
 
-			hyperlink.SetPointerPressed(e.Pointer);
-			e.Handled = true;
-			that.CompleteGesture(); // Make sure to mute Tapped
+				hyperlink.SetPointerPressed(e.Pointer);
+				e.Handled = true;
+				that.CompleteGesture(); // Make sure to mute Tapped
+			}
 		};
 
 		private static readonly PointerEventHandler OnPointerReleased = (object sender, PointerRoutedEventArgs e) =>
 		{
-			if (sender is TextBlock that
-				&& that.IsCaptured(e.Pointer))
+			if (sender is not TextBlock that)
+			{
+				return;
+			}
+
+
+			if (that._isPressed && that.FindHyperlinkAt(e.GetCurrentPoint(that).Position) is Hyperlink hyperlink)
+			{
+				// if we release on a hyperlink, we don't select anything
+				that.Selection = (0, 0);
+			}
+
+			that._isPressed = false;
+
+			if (that.IsCaptured(e.Pointer))
 			{
 				// On UWP we don't get the Tapped event, so make sure to abort it.
 				that.CompleteGesture();
@@ -869,7 +902,7 @@ namespace Windows.UI.Xaml.Controls
 
 		private static readonly PointerEventHandler OnPointerMoved = (sender, e) =>
 		{
-			if (sender is not TextBlock { HasHyperlink: true } that)
+			if (sender is not TextBlock that)
 			{
 				return;
 			}
@@ -882,6 +915,13 @@ namespace Windows.UI.Xaml.Controls
 				that._hyperlinkOver?.ReleasePointerOver(e.Pointer);
 				that._hyperlinkOver = hyperlink;
 				hyperlink?.SetPointerOver(e.Pointer);
+			}
+
+			if (that._isPressed)
+			{
+				var index = that.Inlines.GetIndexForTextBlock(point.Position, false);
+				that.Selection = (that.Selection.start, index);
+				Console.WriteLine($"Selection {that.Selection.start}:{that.Selection.end}");
 			}
 		};
 
@@ -932,8 +972,15 @@ namespace Windows.UI.Xaml.Controls
 			return aborted;
 		}
 
-		private readonly List<(int start, int end, Hyperlink hyperlink)> _hyperlinks =
-			new List<(int start, int end, Hyperlink hyperlink)>();
+		private readonly ObservableCollection<(int start, int end, Hyperlink hyperlink)> _hyperlinks = new();
+		private (int start, int end) _selection;
+
+		private void HyperlinksOnCollectionChanged(object sender, NotifyCollectionChangedEventArgs e) => RecalculateSubscribeToPointerEvents();
+
+		private void RecalculateSubscribeToPointerEvents()
+		{
+			SubscribeToPointerEvents = HasHyperlink || IsTextSelectionEnabled;
+		}
 
 		private void UpdateHyperlinks()
 		{
@@ -943,13 +990,6 @@ namespace Windows.UI.Xaml.Controls
 			{
 				if (HasHyperlink)
 				{
-					RemoveHandler(PointerPressedEvent, OnPointerPressed);
-					RemoveHandler(PointerReleasedEvent, OnPointerReleased);
-					RemoveHandler(PointerMovedEvent, OnPointerMoved);
-					RemoveHandler(PointerEnteredEvent, OnPointerEntered);
-					RemoveHandler(PointerExitedEvent, OnPointerExit);
-					RemoveHandler(PointerCaptureLostEvent, OnPointerCaptureLost);
-
 					// Make sure to clear the pressed state of removed hyperlinks
 					foreach (var hyperlink in _hyperlinks)
 					{
@@ -963,7 +1003,6 @@ namespace Windows.UI.Xaml.Controls
 				return;
 			}
 
-			var previousHasHyperlinks = HasHyperlink;
 			var previousHyperLinks = _hyperlinks.Select(h => h.hyperlink).ToList();
 			_hyperlinkOver = null;
 			_hyperlinks.Clear();
@@ -990,27 +1029,6 @@ namespace Windows.UI.Xaml.Controls
 			{
 				removed.AbortAllPointerState();
 			}
-
-			// Update events subscriptions if needed
-			// Note: we subscribe to those events only if needed as they increase marshaling on Android and WASM
-			if (HasHyperlink && !previousHasHyperlinks)
-			{
-				InsertHandler(PointerPressedEvent, OnPointerPressed);
-				InsertHandler(PointerReleasedEvent, OnPointerReleased);
-				InsertHandler(PointerMovedEvent, OnPointerMoved);
-				InsertHandler(PointerEnteredEvent, OnPointerEntered);
-				InsertHandler(PointerExitedEvent, OnPointerExit);
-				InsertHandler(PointerCaptureLostEvent, OnPointerCaptureLost);
-			}
-			else if (!HasHyperlink && previousHasHyperlinks)
-			{
-				RemoveHandler(PointerPressedEvent, OnPointerPressed);
-				RemoveHandler(PointerReleasedEvent, OnPointerReleased);
-				RemoveHandler(PointerMovedEvent, OnPointerMoved);
-				RemoveHandler(PointerEnteredEvent, OnPointerEntered);
-				RemoveHandler(PointerExitedEvent, OnPointerExit);
-				RemoveHandler(PointerCaptureLostEvent, OnPointerCaptureLost);
-			}
 		}
 
 		private bool HasHyperlink
@@ -1024,6 +1042,42 @@ namespace Windows.UI.Xaml.Controls
 				return hasHyperlink;
 			}
 		}
+
+		private bool SubscribeToPointerEvents
+		{
+			get => _subscribeToPointerEvents;
+			set
+			{
+				if (_subscribeToPointerEvents == value)
+				{
+					return;
+				}
+
+				_subscribeToPointerEvents = value;
+
+				// Update events subscriptions if needed
+				// Note: we subscribe to those events only if needed as they increase marshaling on Android and WASM
+				if (value)
+				{
+					InsertHandler(PointerPressedEvent, OnPointerPressed);
+					InsertHandler(PointerReleasedEvent, OnPointerReleased);
+					InsertHandler(PointerMovedEvent, OnPointerMoved);
+					InsertHandler(PointerEnteredEvent, OnPointerEntered);
+					InsertHandler(PointerExitedEvent, OnPointerExit);
+					InsertHandler(PointerCaptureLostEvent, OnPointerCaptureLost);
+				}
+				else
+				{
+					RemoveHandler(PointerPressedEvent, OnPointerPressed);
+					RemoveHandler(PointerReleasedEvent, OnPointerReleased);
+					RemoveHandler(PointerMovedEvent, OnPointerMoved);
+					RemoveHandler(PointerEnteredEvent, OnPointerEntered);
+					RemoveHandler(PointerExitedEvent, OnPointerExit);
+					RemoveHandler(PointerCaptureLostEvent, OnPointerCaptureLost);
+				}
+			}
+		}
+
 
 #if !__SKIA__
 		private Hyperlink FindHyperlinkAt(Point point)
