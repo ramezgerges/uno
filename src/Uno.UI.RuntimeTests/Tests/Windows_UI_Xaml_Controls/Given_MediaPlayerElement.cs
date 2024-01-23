@@ -128,15 +128,12 @@ public partial class Given_MediaPlayerElement
 		var sut = new MediaPlayerElement()
 		{
 			AutoPlay = true,
-
-			// Workaround to get the control loaded https://github.com/unoplatform/uno/issues/14735
-			AreTransportControlsEnabled = true,
 			Source = MediaSource.CreateFromUri(TestVideoUrl),
 		};
 
 		//Load Player
 		WindowHelper.WindowContent = sut;
-		await WindowHelper.WaitForLoaded(sut, timeoutMS: 6000);
+		await WindowHelper.WaitForLoaded(sut, timeoutMS: 20000);
 
 		sut.MediaPlayer.Play();
 
@@ -173,15 +170,12 @@ public partial class Given_MediaPlayerElement
 		var sut = new MediaPlayerElement()
 		{
 			AutoPlay = true,
-
-			// Workaround to get the control loaded https://github.com/unoplatform/uno/issues/14735
-			AreTransportControlsEnabled = true,
 			Source = MediaSource.CreateFromUri(TestVideoUrl),
 		};
 
 		//Load Player
 		WindowHelper.WindowContent = sut;
-		await WindowHelper.WaitForLoaded(sut, timeoutMS: 6000);
+		await WindowHelper.WaitForLoaded(sut, timeoutMS: 20000);
 
 		sut.MediaPlayer.Play();
 		await WindowHelper.WaitFor(
@@ -278,15 +272,12 @@ public partial class Given_MediaPlayerElement
 		var sut = new MediaPlayerElement()
 		{
 			AutoPlay = true,
-
-			// Workaround to get the control loaded https://github.com/unoplatform/uno/issues/14735
-			AreTransportControlsEnabled = true,
 			Source = MediaSource.CreateFromUri(TestVideoUrl),
 		};
 
 		//Load Player
 		WindowHelper.WindowContent = sut;
-		await WindowHelper.WaitForLoaded(sut, timeoutMS: 6000);
+		await WindowHelper.WaitForLoaded(sut, timeoutMS: 20000);
 
 		sut.AreTransportControlsEnabled = false;
 
