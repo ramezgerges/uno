@@ -33,6 +33,10 @@ public partial class GtkMediaPlayer
 	public event EventHandler<object>? OnSourceLoaded;
 	public event Action? OnNaturalVideoDimensionChanged;
 
+	public event EventHandler<object?>? Playing;
+
+	public event EventHandler<object?>? Paused;
+
 	private bool _updateVideoSizeOnFirstTimeStamp = true;
 	private bool _isParsedLocalFile;
 
@@ -562,11 +566,22 @@ public partial class GtkMediaPlayer
 				}
 				OnGtkSourceFailed(sender, el);
 				break;
-
+			case VLCState.Playing:
+				if (this.Log().IsEnabled(Microsoft.Extensions.Logging.LogLevel.Debug))
+				{
+					this.Log().Debug($"Playing");
+				}
+				Playing?.Invoke(sender, null);
+				break;
+			case VLCState.Paused:
+				if (this.Log().IsEnabled(Microsoft.Extensions.Logging.LogLevel.Debug))
+				{
+					this.Log().Debug($"Paused");
+				}
+				Paused?.Invoke(sender, null);
+				break;
 			case VLCState.NothingSpecial:
 			case VLCState.Buffering:
-			case VLCState.Playing:
-			case VLCState.Paused:
 			case VLCState.Stopped:
 				break;
 

@@ -41,9 +41,13 @@ public partial class MediaPlayerExtension : IMediaPlayerExtension
 
 				if (_owner.PlaybackSession.PlaybackState == MediaPlaybackState.Opening)
 				{
+					// We need to start playing the video whether or not we actually want it to autoplay.
+					// This is necessary for VLC to load it. This makes the behaviour closer to WinUI, which
+					// loads the video and shows the first frame even if the video is not set to play.
+					_player.Play();
+
 					if (_isPlayRequested)
 					{
-						_player.Play();
 						_owner.PlaybackSession.PlaybackState = MediaPlaybackState.Playing;
 					}
 				}
@@ -125,6 +129,30 @@ public partial class MediaPlayerExtension : IMediaPlayerExtension
 			this.Log().Debug($"MediaPlayerElementExtension.OnMediaFailed({message})");
 		}
 		_owner.PlaybackSession.PlaybackState = MediaPlaybackState.None;
+	}
+
+	private void OnMediaPlaying()
+	{
+		if (_player is { } && _owner.PlaybackSession.PlaybackState == MediaPlaybackState.Opening)
+		{
+			// if !_isPlayRequested on first load
+			// _player.InvalidateMeasure();
+			// _player.InvalidateArrange();
+			// _player.UpdateLayout();
+			_player.Pause();
+		}
+	}
+
+	private void OnMediaPaused()
+	{
+		if (_player is { } && _owner.PlaybackSession.PlaybackState == MediaPlaybackState.Opening)
+		{
+			_owner.PlaybackSession.PlaybackState = MediaPlaybackState.Paused;
+			Position = TimeSpan.Zero;
+			// _player.InvalidateMeasure();
+			// _player.InvalidateArrange();
+			// _player.UpdateLayout();
+		}
 	}
 
 	public void OnVolumeChanged()

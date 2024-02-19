@@ -227,12 +227,7 @@ public partial class GtkMediaPlayer : FrameworkElement
 				this.Log().Debug("Pause");
 			}
 
-			_ = Task.Run(() =>
-			{
-				// Required to be on a background thread
-				// to avoid deadlocks
-				_mediaPlayer.Pause();
-			});
+			_mediaPlayer.Pause();
 
 			_videoView.SetVisible(true);
 		}
@@ -288,7 +283,7 @@ public partial class GtkMediaPlayer : FrameworkElement
 	private void GtkMediaPlayer_LayoutUpdated(object? sender, object e)
 		=> UpdateVideoStretch();
 
-	private bool TryGetVideoDetails(
+	public bool TryGetVideoDetails(
 		[NotNullWhen(true)] out uint? videoWidth,
 		[NotNullWhen(true)] out uint? videoHeight,
 		[NotNullWhen(true)] out VideoTrack? videoTrack)
@@ -296,13 +291,15 @@ public partial class GtkMediaPlayer : FrameworkElement
 		if (_mediaPlayer is not null
 			&& _mediaPlayer.Media is not null)
 		{
-			var mediaTrack = _mediaPlayer
+			var videoTracks = _mediaPlayer
 				.Media
 				.Tracks
-				.FirstOrDefault(track => track.TrackType == TrackType.Video);
+				.Where(track => track.TrackType == TrackType.Video && track.Data.Video.SarDen != 0)
+				.ToArray();
 
-			if (mediaTrack is { })
+			if (videoTracks.Length > 0)
 			{
+				var mediaTrack = videoTracks[0];
 				videoTrack = mediaTrack.Data.Video;
 				videoWidth = videoTrack.Value.Width;
 				videoHeight = videoTrack.Value.Height;
@@ -332,10 +329,7 @@ public partial class GtkMediaPlayer : FrameworkElement
 				if (TryGetVideoDetails(out var videoWidth, out var videoHeight, out var videoSettings))
 				{
 					// From: https://github.com/videolan/libvlcsharp/blob/bca0a53fe921e6f1f745e4e3ac83a7bd3b2e4a9d/src/LibVLCSharp/Shared/MediaPlayerElement/AspectRatioManager.cs#L188
-					if (videoSettings.Value.SarDen != 0) // SarNum and SarDen might be supplied layer even though the video details are present
-					{
-						videoWidth = videoWidth * videoSettings.Value.SarNum / videoSettings.Value.SarDen;
-					}
+					videoWidth = videoWidth * videoSettings.Value.SarNum / videoSettings.Value.SarDen;
 
 					// Update video ratio first, so that the cover can be
 					// removed properly without the mediaplayerpresenter to be

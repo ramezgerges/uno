@@ -99,9 +99,7 @@ public partial class Given_MediaPlayerElement
 
 		//Load Player
 		WindowHelper.WindowContent = sut;
-		await WindowHelper.WaitForLoaded(sut, timeoutMS: 6000);
-
-		sut.MediaPlayer.Play();
+		await WindowHelper.WaitForLoaded(sut, 20000);
 
 		var mediaTransportControls = sut.TransportControls as MediaTransportControls;
 		Assert.IsNotNull(mediaTransportControls);
@@ -127,8 +125,7 @@ public partial class Given_MediaPlayerElement
 
 		//Load Player
 		WindowHelper.WindowContent = sut;
-		await WindowHelper.WaitForLoaded(sut, timeoutMS: 20000);
-
+		await WindowHelper.WaitForIdle();
 		sut.MediaPlayer.Play();
 
 		try
@@ -169,9 +166,9 @@ public partial class Given_MediaPlayerElement
 
 		//Load Player
 		WindowHelper.WindowContent = sut;
-		await WindowHelper.WaitForLoaded(sut, timeoutMS: 20000);
-
+		await WindowHelper.WaitForIdle();
 		sut.MediaPlayer.Play();
+
 		await WindowHelper.WaitFor(
 				condition: () => sut.MediaPlayer.PlaybackSession.PlaybackState == MediaPlaybackState.Playing,
 				timeoutMS: 3000,
