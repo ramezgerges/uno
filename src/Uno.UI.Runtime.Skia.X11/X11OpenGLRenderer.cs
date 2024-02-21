@@ -35,6 +35,7 @@ namespace Uno.WinUI.Runtime.Skia.X11
 		void IX11Renderer.InvalidateRender()
 		{
 			using var _1 = X11Helper.XLock(_x11Window.Display);
+			using var _ = _host.LockGL();
 
 			if (_host is X11XamlRootHost { Closed.IsCompleted: true })
 			{

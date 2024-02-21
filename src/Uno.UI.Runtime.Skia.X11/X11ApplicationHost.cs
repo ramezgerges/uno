@@ -53,6 +53,7 @@ public class X11ApplicationHost : SkiaHost, ISkiaApplicationHost, IDisposable
 
 		ApiExtensibility.Register<IXamlRootHost>(typeof(IUnoCorePointerInputSource), o => new X11PointerInputSource(o));
 		ApiExtensibility.Register<IXamlRootHost>(typeof(IUnoKeyboardInputSource), o => new X11KeyboardInputSource(o));
+		ApiExtensibility.Register(typeof(XamlRootMap<IXamlRootHost>), _ => X11Manager.XamlRootMap);
 
 		ApiExtensibility.Register(typeof(INativeWindowFactoryExtension), _ => new X11NativeWindowFactoryExtension());
 
