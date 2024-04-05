@@ -511,7 +511,7 @@ namespace Uno.UI.DataBinding
 			return null;
 		}
 
-		internal bool OnlyFinalSegmentNull()
+		internal bool OnlyLeafNodeNull()
 		{
 			var tail = _chain;
 			while (tail?.Value != null)
