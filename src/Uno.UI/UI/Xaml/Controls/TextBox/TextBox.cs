@@ -100,6 +100,11 @@ namespace Microsoft.UI.Xaml.Controls
 		/// </summary>
 		private bool _isInputClearingText;
 		/// <summary>
+		/// Indicates how many TextChanged events are pending. This is needed for AutoSuggestBox, which needs to
+		/// respond only to the last TextChange event, not all of them.
+		/// </summary>
+		private int _textChangedPendingCount;
+		/// <summary>
 		/// True if Text has changed while the TextBox has had focus, false otherwise
 		///
 		/// This flag is checked to avoid pushing a value to a two-way binding if no edits have occurred, per UWP's behavior.
@@ -306,6 +311,7 @@ namespace Microsoft.UI.Xaml.Controls
 			OnTextChangedPartial();
 
 			var isUserModifyingText = _isInputModifyingText | _isInputClearingText;
+			_textChangedPendingCount++;
 			_ = Dispatcher.RunAsync(CoreDispatcherPriority.Normal, () => RaiseTextChanged(isUserModifyingText));
 		}
 
@@ -335,6 +341,7 @@ namespace Microsoft.UI.Xaml.Controls
 		/// </summary>
 		private void RaiseTextChanged(bool isUserModifyingText)
 		{
+			_textChangedPendingCount--;
 			if (_isInvokingTextChanged)
 			{
 				return;
@@ -345,7 +352,7 @@ namespace Microsoft.UI.Xaml.Controls
 				_isInvokingTextChanged = true;
 				if (!_suppressTextChanged) // This workaround can be removed if pooling is removed. See https://github.com/unoplatform/uno/issues/12189
 				{
-					TextChanged?.Invoke(this, new TextChangedEventArgs(this, isUserModifyingText));
+					TextChanged?.Invoke(this, new TextChangedEventArgs(this, isUserModifyingText, _textChangedPendingCount > 0));
 				}
 			}
 			finally
