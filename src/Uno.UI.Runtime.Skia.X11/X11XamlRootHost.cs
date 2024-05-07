@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Threading;
 using System.Threading.Tasks;
 using Windows.ApplicationModel.Core;
 using Windows.Foundation;
@@ -12,7 +11,6 @@ using Windows.UI.ViewManagement;
 using Uno.Foundation.Logging;
 using Uno.UI.Hosting;
 using Microsoft.UI.Xaml;
-using Silk.NET.OpenGL;
 using SkiaSharp;
 using Uno.Disposables;
 using Uno.UI;
@@ -46,7 +44,6 @@ internal partial class X11XamlRootHost : IXamlRootHost
 	private readonly ApplicationView _applicationView;
 	private readonly X11WindowWrapper _wrapper;
 	private readonly Window _window;
-	private readonly object _glLock = new object();
 
 	private X11Window? _x11Window;
 	private IX11Renderer? _renderer;
@@ -442,22 +439,4 @@ internal partial class X11XamlRootHost : IXamlRootHost
 	void IXamlRootHost.InvalidateRender() => _renderer?.InvalidateRender();
 
 	UIElement? IXamlRootHost.RootElement => _window.RootElement;
-
-	object? IXamlRootHost.GetGL() => GL.GetApi(GlxInterface.glXGetProcAddress);
-
-	// To prevent concurrent GL operations breaking the state, you should obtain the lock while
-	// using GL commands. Make sure to restore all the state to default before unlocking (i.e. unbind
-	// all used buffers, textures, etc.)
-	IDisposable IXamlRootHost.LockGL()
-	{
-		// we don't use a SemaphoreSlim as it's not reentrant.
-		Monitor.Enter(_glLock);
-		return new GLLockDisposable(_glLock);
-	}
-
-	private readonly struct GLLockDisposable(object @lock) : IDisposable
-	{
-
-		public void Dispose() => Monitor.Exit(@lock);
-	}
 }
