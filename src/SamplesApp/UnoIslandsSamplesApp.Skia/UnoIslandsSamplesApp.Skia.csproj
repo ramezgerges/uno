@@ -24,6 +24,7 @@
 		<ProjectReference Include="..\..\Uno.Foundation\Uno.Foundation.Skia.csproj" />
 		<ProjectReference Include="..\..\Uno.UI.FluentTheme\Uno.UI.FluentTheme.Skia.csproj" />
 		<ProjectReference Include="..\..\Uno.UI.RemoteControl\Uno.UI.RemoteControl.Skia.csproj" />
+		<ProjectReference Include="..\..\Uno.UI.Runtime.Skia\Uno.UI.Runtime.Skia.csproj" />
 		<ProjectReference Include="..\..\Uno.UI.RuntimeTests\Uno.UI.RuntimeTests.Skia.csproj" />
 		<ProjectReference Include="..\..\Uno.UI.XamlHost\Uno.UI.XamlHost.Skia.csproj" />
 		<ProjectReference Include="..\..\Uno.UI\Uno.UI.Skia.csproj" />
@@ -66,6 +67,15 @@
 
 	<ItemGroup>
 		<Content Update="@(Content)" CopyToOutputDirectory="PreserveNewest" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Reference Include="Silk.NET.Core">
+	    <HintPath>..\..\..\..\..\..\.nuget\packages\silk.net.core\2.16.0\lib\net6.0\Silk.NET.Core.dll</HintPath>
+	  </Reference>
+	  <Reference Include="Silk.NET.OpenGL">
+	    <HintPath>..\..\..\..\..\..\.nuget\packages\silk.net.opengl\2.16.0\lib\net5.0\Silk.NET.OpenGL.dll</HintPath>
+	  </Reference>
 	</ItemGroup>
 
 </Project>

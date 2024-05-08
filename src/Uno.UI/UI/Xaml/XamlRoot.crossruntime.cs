@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics;
+using Windows.System;
 using Uno.Foundation.Logging;
 using Uno.UI.Dispatching;
 
@@ -64,7 +65,7 @@ public sealed partial class XamlRoot
 				_renderQueued = false;
 				InvalidateRender();
 			}
-		});
+		}, Uno.UI.Dispatching.NativeDispatcherPriority.Idle);
 	}
 
 

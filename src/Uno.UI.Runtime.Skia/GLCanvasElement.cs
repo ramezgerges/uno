@@ -85,17 +85,15 @@ public abstract partial class GLCanvasElement : FrameworkElement
 					_gl.TexParameterI(GLEnum.Texture2D, GLEnum.TextureMagFilter, (uint)GLEnum.Linear);
 					_gl.FramebufferTexture2D(GLEnum.Framebuffer, FramebufferAttachment.ColorAttachment0, GLEnum.Texture2D, _textureColorBuffer, 0);
 				}
-				_gl.BindTexture(GLEnum.Texture2D, 0);
 
 				_renderBuffer = _gl.GenRenderbuffer();
 				_gl.BindRenderbuffer(GLEnum.Renderbuffer, _renderBuffer);
 				{
-					_gl.RenderbufferStorage(GLEnum.Renderbuffer, InternalFormat.Depth24Stencil8, _width, _height);
-					_gl.FramebufferRenderbuffer(GLEnum.Framebuffer, GLEnum.DepthStencilAttachment, GLEnum.Renderbuffer, _renderBuffer);
+					_gl.RenderbufferStorage(GLEnum.Renderbuffer, InternalFormat.DepthComponent32, _width, _height);
+					_gl.FramebufferRenderbuffer(GLEnum.Framebuffer, GLEnum.DepthAttachment, GLEnum.Renderbuffer, _renderBuffer);
 
 					Init(_gl);
 				}
-				_gl.BindRenderbuffer(GLEnum.Renderbuffer, 0);
 
 				if (_gl.CheckFramebufferStatus(GLEnum.Framebuffer) != GLEnum.FramebufferComplete)
 				{
