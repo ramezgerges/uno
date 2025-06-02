@@ -25,5 +25,45 @@ namespace UITests.Shared.Windows_UI_Xaml_Media.Transform
 		{
 			this.InitializeComponent();
 		}
+
+		private void Button_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs e)
+		{
+			ValueFlyout.Items.Clear();
+			var cancelOption = new MenuFlyoutItem
+			{
+				// Add space for Uno rendering bug
+				Text = $"(select this to cancel)" + " ",
+				Icon = new SymbolIcon(Symbol.Cancel),
+				Tag = "CANCEL"
+			};
+			//cancelOption.Click += FlyoutItem_Click;
+			ValueFlyout.Items.Add(cancelOption);
+			ValueFlyout.Items.Add(new MenuFlyoutSeparator());
+
+			var newItem = new MenuFlyoutItem
+			{
+				Text = "New Item 1",
+				Icon = new SymbolIcon(Symbol.Target)
+			};
+			ValueFlyout.Items.Add(newItem);
+
+			newItem = new MenuFlyoutItem
+			{
+				Text = "New Item 2"
+			};
+			ValueFlyout.Items.Add(newItem);
+
+			newItem = new MenuFlyoutItem
+			{
+				Text = "New Item 3"
+			};
+			ValueFlyout.Items.Add(newItem);
+
+			ValueFlyout.ShowAt((FrameworkElement)sender, new FlyoutShowOptions
+			{
+				Placement = FlyoutPlacementMode.Auto,
+				ShowMode = FlyoutShowMode.Standard
+			});
+		}
 	}
 }

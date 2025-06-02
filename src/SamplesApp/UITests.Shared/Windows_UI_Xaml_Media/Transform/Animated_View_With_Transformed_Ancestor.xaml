@@ -9,55 +9,30 @@
 			 d:DesignHeight="300"
 			 d:DesignWidth="400">
 
-	<controls:SampleControl SampleDescription="Animated Border below is within a transformed view, it should still animate outside its untransformed bounds.">
-		<controls:SampleControl.SampleContent>
-			<DataTemplate>
-				<StackPanel Margin="50,0,0,0"
-							Background="LightGray">
-					<Slider x:Name="YSlider"
-							Minimum="0"
-							Maximum="100"
-							Value="10"
-							Width="200" />
-					<Button Content="Dummy"
-							Margin="20" />
-					<CheckBox x:Name="IsActiveCheckBox"
-							  Margin="20"
-							  IsChecked="True" />
-					<Border HorizontalAlignment="Left"
-							VerticalAlignment="Top">
-						<Border.RenderTransform>
-							<TranslateTransform X="{Binding ElementName=YSlider, Path=Value}" />
-						</Border.RenderTransform>
-						<Border HorizontalAlignment="Left"
-								VerticalAlignment="Top">
-							<local:AnimatedContentControl IsAnimating="{Binding ElementName=IsActiveCheckBox, Path=IsChecked}">
-								<Border x:Name="OpacityBorder"
-										Margin="40,20,40,20"
-										Width="20"
-										Height="20"
-										Background="Purple">
-									<VisualStateManager.VisualStateGroups>
-										<VisualStateGroup x:Name="Animation">
-											<VisualState x:Name="NotAnimating" />
-											<VisualState x:Name="Animating">
-												<Storyboard>
-													<DoubleAnimation Storyboard.TargetName="OpacityBorder"
-																	 Storyboard.TargetProperty="Opacity"
-																	 From="0"
-																	 To="1"
-																	 Duration="0:0:05"
-																	 RepeatBehavior="Forever" />
-												</Storyboard>
-											</VisualState>
-										</VisualStateGroup>
-									</VisualStateManager.VisualStateGroups>
-								</Border>
-							</local:AnimatedContentControl>
-						</Border>
-					</Border>
-				</StackPanel>
-			</DataTemplate>
-		</controls:SampleControl.SampleContent>
-	</controls:SampleControl>
+	<StackPanel>
+		<ScrollViewer HorizontalScrollMode="Disabled" VerticalScrollBarVisibility="Auto" x:Name="RepeaterScrollViewer" Padding="4,0,4,8" Height="100" Width="500">
+			<ScrollViewer.ContextFlyout>
+				<MenuFlyout x:Name="ValueFlyout">
+					<MenuFlyout.MenuFlyoutPresenterStyle>
+						<Style TargetType="MenuFlyoutPresenter">
+							<Setter Property="MaxWidth" Value="500"/>
+							<Setter Property="MinWidth" Value="100"/>
+						</Style>
+					</MenuFlyout.MenuFlyoutPresenterStyle>
+				</MenuFlyout>
+			</ScrollViewer.ContextFlyout>
+			<StackPanel Orientation="Vertical">
+				<TextBlock Text="Test test test" FontSize="20"/>
+				<TextBlock Text="Test test test" FontSize="20"/>
+				<TextBlock Text="Test test test" FontSize="20"/>
+				<TextBlock Text="Test test test" FontSize="20"/>
+				<TextBlock Text="Test test test" FontSize="20"/>
+				<TextBlock Text="Test test test" FontSize="20"/>
+
+			</StackPanel>
+		</ScrollViewer>
+
+		<Button Content="Flyout" Tapped="Button_Tapped"/>
+
+	</StackPanel>
 </UserControl>

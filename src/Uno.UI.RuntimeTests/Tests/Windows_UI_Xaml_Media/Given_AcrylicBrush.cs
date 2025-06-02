@@ -9,7 +9,7 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Storage;
 using System.IO;
-using Uno.UITest.Helpers.Queries;
+using FluentAssertions;
 
 #if __SKIA__
 using SkiaSharp;
@@ -110,6 +110,32 @@ public class Given_AcrylicBrush
 		var actualImg = await UITestHelper.ScreenShot(actualElm);
 
 		return (expectedImg, actualImg);
+	}
+
+	[TestMethod]
+	[RunsOnUIThread]
+	public async Task When_Idle()
+	{
+		// <Border x:Name="CustomAcrylicShapeInApp" Margin="12">
+		// <Border.Background>
+		// 	<AcrylicBrush x:Name="acrylicBrush" TintOpacity="0.5" TintColor="Red" FallbackColor="Green" />
+		// 	</Border.Background>
+		// 	<Rectangle Fill="White" Height="100" Width="100" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+		// 	</Border>
+		var border = new Border
+		{
+			Width = 200,
+			Height = 200,
+			Background = new AcrylicBrush { TintOpacity = 0.5, TintColor = Microsoft.UI.Colors.Red },
+		};
+
+		await UITestHelper.Load(border);
+
+		var renderInvalidateCount = 0;
+		border.XamlRoot.RenderInvalidated += () => renderInvalidateCount++;
+
+		await Task.Delay(TimeSpan.FromSeconds(5));
+		renderInvalidateCount.Should().BeLessThan(100);
 	}
 }
 #endif

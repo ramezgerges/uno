@@ -21,7 +21,6 @@ public partial class CompositionEffectBrush : CompositionBrush
 	private SKRect _currentBounds;
 	private SKImageFilter? _filter;
 	private bool _hasBackdropBrushInput;
-	private bool _hasBackdropBrushInputPrivate; // this one is reset and set during effect generation and is only copied to _hasBackdropBrushInput once done. This avoids needless invalidations when HasBackdropBrushInput is reset then set immediately.
 
 	internal bool HasBackdropBrushInput
 	{
@@ -1466,7 +1465,7 @@ $$"""
 						if (brush is CompositionBackdropBrush)
 						{
 							_isCurrentInputBackdrop = true;
-							_hasBackdropBrushInputPrivate = true;
+							HasBackdropBrushInput = true;
 							return null;
 						}
 
@@ -1606,9 +1605,8 @@ $$"""
 		if (_currentBounds != bounds || _filter is null || Compositor.IsSoftwareRenderer != _currentCompMode)
 		{
 			_isCurrentInputBackdrop = false;
-			_hasBackdropBrushInputPrivate = false;
+			HasBackdropBrushInput = false;
 			_filter = GenerateEffectFilter(_effect, bounds) ?? throw new NotSupportedException($"Unsupported effect description.\r\nEffect name: {_effect.Name}");
-			HasBackdropBrushInput = _hasBackdropBrushInputPrivate;
 			_currentBounds = bounds;
 			_currentCompMode = Compositor.IsSoftwareRenderer;
 		}
