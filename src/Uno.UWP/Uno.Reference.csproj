@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 	<PropertyGroup>
 		<TargetFrameworks>$(NetReferencePreviousAndCurrent)</TargetFrameworks>
+<!--		<UnoDisableTargetFrameworkPlatformOverride>true</UnoDisableTargetFrameworkPlatformOverride>-->
 	</PropertyGroup>
 
 	<Import Project="../targetframework-override.props" />

@@ -3,7 +3,6 @@
 	<PropertyGroup>
 		<TargetFrameworks>$(NetReferencePreviousAndCurrent)</TargetFrameworks>
 	</PropertyGroup>
-
 	<Import Project="../targetframework-override.props" />
 
 	<PropertyGroup>
