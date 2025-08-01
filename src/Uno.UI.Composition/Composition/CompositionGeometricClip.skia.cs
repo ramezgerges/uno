@@ -9,7 +9,7 @@ namespace Microsoft.UI.Composition;
 
 partial class CompositionGeometricClip
 {
-	private protected override Rect? GetBoundsCore(Visual visual)
+	private protected override bool GetBoundsCore(Visual visual, out Rect bounds)
 	{
 		if (Geometry is not null)
 		{
@@ -17,7 +17,8 @@ partial class CompositionGeometricClip
 
 			if (geometry is SkiaGeometrySource2D skiaGeometrySource)
 			{
-				return skiaGeometrySource.Geometry.TightBounds.ToRect();
+				bounds = skiaGeometrySource.Geometry.TightBounds.ToRect();
+				return true;
 			}
 			else
 			{
@@ -25,7 +26,8 @@ partial class CompositionGeometricClip
 			}
 		}
 
-		return null;
+		bounds = Rect.Empty;
+		return false;
 	}
 
 	internal override SKPath? GetClipPath(Visual visual)
