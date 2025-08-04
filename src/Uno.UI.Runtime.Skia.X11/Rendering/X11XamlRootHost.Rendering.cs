@@ -19,11 +19,6 @@ internal partial class X11XamlRootHost
 		if (DispatcherQueue.Main.HasThreadAccess)
 		{
 			var rootElement = (this as IXamlRootHost).RootElement;
-			if (rootElement is not null && (rootElement.IsArrangeDirtyOrArrangeDirtyPath || rootElement.IsMeasureDirtyOrMeasureDirtyPath))
-			{
-				NativeDispatcher.Main.Enqueue(() => ((IXamlRootHost)this).InvalidateRender());
-				return;
-			}
 
 			var canvas = _recorder.BeginRecording(new SKRect(-999999, -999999, 999999, 999999));
 			using (new SKAutoCanvasRestore(canvas, true))

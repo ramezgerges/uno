@@ -28,12 +28,6 @@ internal partial class Win32WindowWrapper
 			return;
 		}
 
-		if (((IXamlRootHost)this).RootElement is { } rootElement && (rootElement.IsArrangeDirtyOrArrangeDirtyPath || rootElement.IsMeasureDirtyOrMeasureDirtyPath))
-		{
-			((IXamlRootHost)this).InvalidateRender();
-			return;
-		}
-
 		using var _ = _fpsHelper.BeginFrame();
 
 		this.LogTrace()?.Trace($"Render {this._renderCount++}");

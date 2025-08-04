@@ -1,4 +1,5 @@
-﻿using SkiaSharp;
+﻿using System;
+using SkiaSharp;
 using MUX = Microsoft.UI.Xaml;
 using Uno.Foundation.Logging;
 using Windows.Graphics.Display;
@@ -65,12 +66,6 @@ internal partial class BrowserRenderer
 	private void RenderFrame()
 	{
 		using var _ = _fpsHelper.BeginFrame();
-
-		if (_host.RootElement is { } rootElement && (rootElement.IsArrangeDirtyOrArrangeDirtyPath || rootElement.IsMeasureDirtyOrMeasureDirtyPath))
-		{
-			InvalidateRender();
-			return;
-		}
 
 		if (!_jsInfo.IsValid)
 		{
