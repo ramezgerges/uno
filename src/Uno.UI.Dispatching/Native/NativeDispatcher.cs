@@ -20,6 +20,11 @@ namespace Uno.UI.Dispatching
 	/// </summary>
 	internal sealed partial class NativeDispatcher
 	{
+#if __WASM__ // On WASM, the cost of enqueuing on the JS event loop is extremely high, so we process multiple dispatcher jobs at once instead of going to the event loop and back for each job.
+		private static readonly int _numberOfConsecutiveJobsToRunPerDispatchItemsCall = 5;
+#endif
+		private static readonly IEventProvider _trace = Tracing.Get(TraceProvider.Id);
+
 		/// <summary>
 		/// Defines a set of queues based on the number of priorities defined in <see cref="NativeDispatcherPriority"/>.
 		/// </summary>
@@ -43,8 +48,6 @@ namespace Uno.UI.Dispatching
 
 		[ThreadStatic]
 		private static bool? _hasThreadAccess;
-
-		private readonly static IEventProvider _trace = Tracing.Get(TraceProvider.Id);
 
 		private NativeDispatcher()
 		{
@@ -94,7 +97,12 @@ namespace Uno.UI.Dispatching
 		}
 
 #if __ANDROID__ || __WASM__ || __SKIA__ || __APPLE_UIKIT__ || IS_UNIT_TESTS
+#if __WASM__
+		private static void DispatchItems() => DispatchItems(_numberOfConsecutiveJobsToRunPerDispatchItemsCall);
+		private static void DispatchItems(int numberOfJobsToRunSynchronously)
+#else
 		private static void DispatchItems()
+#endif
 		{
 			// Currently, we have a singleton NativeDispatcher.
 			// We want DispatchItems to be static to avoid delegate allocations.
@@ -120,11 +128,6 @@ namespace Uno.UI.Dispatching
 
 						@this._currentPriority = (NativeDispatcherPriority)p;
 
-						if (Interlocked.Decrement(ref @this._globalCount) > 0)
-						{
-							@this.EnqueueNative(@this._currentPriority);
-						}
-
 						break;
 					}
 				}
@@ -135,6 +138,22 @@ namespace Uno.UI.Dispatching
 			// Restore the priority to the default for native events
 			// (i.e. not dispatched by this running loop)
 			@this._currentPriority = NativeDispatcherPriority.Normal;
+
+			if (Interlocked.Decrement(ref @this._globalCount) > 0)
+			{
+#if __WASM__
+				if (numberOfJobsToRunSynchronously == 0)
+				{
+					@this.EnqueueNative(@this._currentPriority);
+				}
+				else
+				{
+					DispatchItems(numberOfJobsToRunSynchronously - 1);
+				}
+#else
+				@this.EnqueueNative(@this._currentPriority);
+#endif
+			}
 		}
 
 		/// <remarks>
