@@ -20,9 +20,6 @@ namespace Uno.UI.Dispatching
 	/// </summary>
 	internal sealed partial class NativeDispatcher
 	{
-#if __WASM__ // On WASM, the cost of enqueuing on the JS event loop is extremely high, so we process multiple dispatcher jobs at once instead of going to the event loop and back for each job.
-		private static readonly int _numberOfConsecutiveJobsToRunPerDispatchItemsCall = 5;
-#endif
 		private static readonly IEventProvider _trace = Tracing.Get(TraceProvider.Id);
 
 		/// <summary>
@@ -98,7 +95,7 @@ namespace Uno.UI.Dispatching
 
 #if __ANDROID__ || __WASM__ || __SKIA__ || __APPLE_UIKIT__ || IS_UNIT_TESTS
 #if __WASM__
-		private static void DispatchItems() => DispatchItems(_numberOfConsecutiveJobsToRunPerDispatchItemsCall);
+		private static void DispatchItems() => DispatchItems(0);
 		private static void DispatchItems(int numberOfJobsToRunSynchronously)
 #else
 		private static void DispatchItems()
@@ -478,22 +475,6 @@ namespace Uno.UI.Dispatching
 				new[] {
 					((int)priority).ToString(CultureInfo.InvariantCulture),
 					handler.Method.DeclaringType?.FullName + "." + handler.Method.Name });
-
-		/// <summary>
-		/// Wakes up the dispatcher.
-		/// </summary>
-		internal void WakeUp()
-		{
-			lock (_gate)
-			{
-				if (Interlocked.Increment(ref _globalCount) == 1)
-				{
-					EnqueueNative(NativeDispatcherPriority.Normal);
-				}
-
-				Interlocked.Decrement(ref _globalCount);
-			}
-		}
 
 		/// <summary>
 		/// Gets the priority of the current task.
