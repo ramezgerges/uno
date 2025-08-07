@@ -9,18 +9,25 @@
 			isReady.then(() => {
 				NativeDispatcher._dispatcherCallback = (<any>globalThis).DotnetExports.UnoUIDispatching.Uno.UI.Dispatching.NativeDispatcher.DispatcherCallback;
 
+				NativeDispatcher.WakeUp(true);
 				NativeDispatcher._isReady = true;
-				const callback = (timestamp: DOMHighResTimeStamp) => {
+			});;
+		}
+
+		// Queues a dispatcher callback on the event loop
+		public static WakeUp(force: boolean) {
+
+			if (NativeDispatcher._isReady || force) {
+				(<any>window).setImmediate(() => {
 					try {
-						NativeDispatcher._dispatcherCallback(timestamp);
-					} catch (e) {
+						NativeDispatcher._dispatcherCallback();
+					}
+					catch (e) {
 						console.error(`Unhandled dispatcher exception: ${e} (${e.stack})`);
 						throw e;
 					}
-					requestAnimationFrame(callback);
-				};
-				requestAnimationFrame(callback);
-			});
+				});
+			}
 		}
 	}
 }

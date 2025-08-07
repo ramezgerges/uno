@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
@@ -11,20 +10,11 @@ namespace Uno.UI.Dispatching
 {
 	internal sealed partial class NativeDispatcher
 	{
-		private const int NumberOfTimestampDeltaToKeep = 20;
-		private static readonly double _dispatcherFrameTime = 1000.0 / 60;
-		private static readonly List<double> _timestampDeltas = new(NumberOfTimestampDeltaToKeep);
-		private static int _timestampsHead;
-		private static double? _lastTimestamp;
-		private static double _runningAverage;
-		private static readonly int[] _numberOfConsecutiveJobsToRunPerDispatchItemsCallOptions = [0, 2, 4, 6];
-		private static int _numberOfConsecutiveJobsToRunPerDispatchItemsCall;
-
 		private long _lastDispatchRendering;
 
 #pragma warning disable IDE0051 // Remove unused private members
 		[JSExport]
-		private static void DispatcherCallback(double timestamp)
+		private static void DispatcherCallback()
 #pragma warning restore IDE0051 // Remove unused private members
 		{
 			if (typeof(NativeDispatcher).Log().IsEnabled(LogLevel.Trace))
@@ -32,45 +22,7 @@ namespace Uno.UI.Dispatching
 				typeof(NativeDispatcher).Log().Trace($"[tid:{Environment.CurrentManagedThreadId}]: NativeDispatcher.DispatcherCallback()");
 			}
 
-			if (_lastTimestamp is { } lastTimestamp)
-			{
-				var delta = timestamp - lastTimestamp;
-				if (_timestampDeltas.Count == NumberOfTimestampDeltaToKeep)
-				{
-					var removedDelta = _timestampDeltas[_timestampsHead];
-					_timestampDeltas[_timestampsHead] = delta;
-					_timestampsHead = (_timestampsHead + 1) % NumberOfTimestampDeltaToKeep;
-					_runningAverage += (delta - removedDelta) / NumberOfTimestampDeltaToKeep;
-				}
-				else
-				{
-					_timestampDeltas.Add(delta);
-					if (_timestampDeltas.Count == NumberOfTimestampDeltaToKeep)
-					{
-						_runningAverage = _timestampDeltas.Average();
-					}
-				}
-			}
-			_lastTimestamp = timestamp;
-			if (_runningAverage != 0)
-			{
-				if (_runningAverage - _dispatcherFrameTime < 5)
-				{
-					if (_numberOfConsecutiveJobsToRunPerDispatchItemsCall != _numberOfConsecutiveJobsToRunPerDispatchItemsCallOptions.Length)
-					{
-						_numberOfConsecutiveJobsToRunPerDispatchItemsCall++;
-					}
-				}
-				else
-				{
-					if (_numberOfConsecutiveJobsToRunPerDispatchItemsCall != 0)
-					{
-						_numberOfConsecutiveJobsToRunPerDispatchItemsCall--;
-					}
-				}
-			}
-			Console.WriteLine($"_numberOfConsecutiveJobsToRunPerDispatchItemsCall = {_numberOfConsecutiveJobsToRunPerDispatchItemsCall}");
-			DispatchItems(_numberOfConsecutiveJobsToRunPerDispatchItemsCallOptions[_numberOfConsecutiveJobsToRunPerDispatchItemsCall]);
+			DispatchItems();
 		}
 
 		partial void Initialize()
@@ -108,7 +60,11 @@ namespace Uno.UI.Dispatching
 
 			if (DispatchOverride == null)
 			{
-				if (IsThreadingSupported && Environment.CurrentManagedThreadId != 1)
+				if (!IsThreadingSupported || Environment.CurrentManagedThreadId == 1)
+				{
+					NativeMethods.WakeUp();
+				}
+				else
 				{
 					// This is a separate function to avoid enclosing early resolution
 					// by the interpreter/JIT, in case we're running the non-threaded
@@ -149,6 +105,12 @@ namespace Uno.UI.Dispatching
 				DispatchItems();
 				RaiseRendered();
 			}
+		}
+
+		internal static partial class NativeMethods
+		{
+			[JSImport("globalThis.Uno.UI.Dispatching.NativeDispatcher.WakeUp")]
+			internal static partial void WakeUp();
 		}
 	}
 }
