@@ -803,7 +803,8 @@ internal readonly partial struct UnicodeText : IParsedText
 
 	public void Draw(in Visual.PaintingSession session,
 		(int index, CompositionBrush brush, float thickness)? caret, // null to skip drawing a caret
-		IEnumerable<TextHighlighter> highlighters)
+		IEnumerable<TextHighlighter> highlighters,
+		(int startIndex, int length)? compositionRange = null)
 	{
 		var highlighterSlicer = new RangeSlicer<(CompositionBrush? background, Brush foreground)>(0, _text.Length);
 		foreach (var highlighter in highlighters)
@@ -823,6 +824,7 @@ internal readonly partial struct UnicodeText : IParsedText
 
 		Dictionary<SKColor, Dictionary<SKFont, (List<ushort> glyphs, List<SKPoint> positions)>> _colorToFontToGlyphs = new();
 		List<(SKPath path, float strokeThickness)> spellCheckUnderlines = new();
+		List<(float x1, float x2, float y, SKColor color)> compositionUnderlines = new();
 
 		SKRect? caretRect = default;
 
@@ -927,6 +929,21 @@ internal readonly partial struct UnicodeText : IParsedText
 				}
 			}
 
+			if (compositionRange is var (compStart, compLen) && compLen > 0)
+			{
+				var compEnd = compStart + compLen;
+				if (cluster.Value.start < compEnd && cluster.Value.end > compStart)
+				{
+					var fontSize = fontDetails.SKFontSize;
+					var yOffset = 2 * (fontSize / 12.0f);
+					var underlineY = y + line.baselineOffset + yOffset;
+					var underlineLeftX = unalignedX + alignmentOffset;
+					var underlineRightX = underlineLeftX + cluster.Value.width;
+					var foreColor = BrushToColor(highlighter.Value.foreground, session.Opacity);
+					compositionUnderlines.Add((underlineLeftX, underlineRightX, underlineY, foreColor));
+				}
+			}
+
 			if (caret is var (caretIndex, _, caretThickness))
 			{
 				if (caretIndex >= cluster.Value.start && caretIndex < cluster.Value.end)
@@ -960,6 +977,18 @@ internal readonly partial struct UnicodeText : IParsedText
 		{
 			_spareSpellCheckPaint.StrokeWidth = strokeThickness;
 			session.Canvas.DrawPath(path, _spareSpellCheckPaint);
+		}
+
+		foreach (var (x1, x2, underlineY, color) in compositionUnderlines)
+		{
+			using var paint = new SKPaint
+			{
+				Color = color,
+				Style = SKPaintStyle.Stroke,
+				StrokeWidth = 1,
+				IsAntialias = true
+			};
+			session.Canvas.DrawLine(x1, underlineY, x2, underlineY, paint);
 		}
 
 		if (caretRect is null && caret?.index == _text.Length) // ending new line or empty text

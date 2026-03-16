@@ -75,6 +75,124 @@ public partial class TextBox
 
 	private MenuFlyout _proofingMenu;
 
+	// IME composition state
+	private static IImeTextBoxExtension _imeExtension;
+	private bool _isComposing;
+	private int _compositionStartIndex;
+	private int _compositionLength;
+	private string _originalTextBeforeComposition;
+	private int _originalSelectionStart;
+
+	// IME composition events
+	public event TypedEventHandler<TextBox, TextCompositionStartedEventArgs> TextCompositionStarted;
+	public event TypedEventHandler<TextBox, TextCompositionChangedEventArgs> TextCompositionChanged;
+	public event TypedEventHandler<TextBox, TextCompositionEndedEventArgs> TextCompositionEnded;
+
+	internal void RaiseTextCompositionStarted(int startIndex, int length)
+		=> TextCompositionStarted?.Invoke(this, new TextCompositionStartedEventArgs(startIndex, length));
+
+	internal void RaiseTextCompositionChanged(int startIndex, int length)
+		=> TextCompositionChanged?.Invoke(this, new TextCompositionChangedEventArgs(startIndex, length));
+
+	internal void RaiseTextCompositionEnded(int startIndex, int length)
+		=> TextCompositionEnded?.Invoke(this, new TextCompositionEndedEventArgs(startIndex, length));
+
+	internal bool IsComposing => _isComposing;
+	internal int CompositionStartIndex => _compositionStartIndex;
+	internal int CompositionLength => _compositionLength;
+
+	private void OnImeCompositionStarted()
+	{
+		if (IsReadOnly)
+		{
+			return;
+		}
+
+		_isComposing = true;
+		_originalTextBeforeComposition = Text;
+		_originalSelectionStart = SelectionStart;
+		_compositionStartIndex = SelectionStart;
+		_compositionLength = 0;
+
+		RaiseTextCompositionStarted(_compositionStartIndex, _compositionLength);
+	}
+
+	private void OnImeCompositionUpdated(string compositionText)
+	{
+		if (!_isComposing || IsReadOnly)
+		{
+			return;
+		}
+
+		var text = Text;
+		var newText = text[.._compositionStartIndex] + compositionText + text[(_compositionStartIndex + _compositionLength)..];
+		_compositionLength = compositionText.Length;
+
+		_suppressCurrentlyTyping = true;
+		_clearHistoryOnTextChanged = false;
+		_pendingSelection = (_compositionStartIndex + _compositionLength, 0);
+		ProcessTextInput(newText);
+		_clearHistoryOnTextChanged = true;
+		_suppressCurrentlyTyping = false;
+
+		RaiseTextCompositionChanged(_compositionStartIndex, _compositionLength);
+		if (TextBoxView?.DisplayBlock.Visual is { } v) { Visual.Compositor.InvalidateRender(v); }
+	}
+
+	private void OnImeCompositionCompleted(string committedText)
+	{
+		if (!_isComposing || IsReadOnly)
+		{
+			return;
+		}
+
+		var text = Text;
+		var newText = text[.._compositionStartIndex] + committedText + text[(_compositionStartIndex + _compositionLength)..];
+		var committedLength = committedText.Length;
+
+		_compositionLength = 0;
+		_isComposing = false;
+
+		TrySetCurrentlyTyping(true);
+		_suppressCurrentlyTyping = true;
+		_clearHistoryOnTextChanged = false;
+		_pendingSelection = (_compositionStartIndex + committedLength, 0);
+		ProcessTextInput(newText);
+		_clearHistoryOnTextChanged = true;
+		_suppressCurrentlyTyping = false;
+
+		RaiseTextCompositionEnded(_compositionStartIndex, committedLength);
+		_compositionStartIndex = 0;
+		_originalTextBeforeComposition = null;
+		if (TextBoxView?.DisplayBlock.Visual is { } v) { Visual.Compositor.InvalidateRender(v); }
+	}
+
+	private void OnImeCompositionEnded()
+	{
+		if (!_isComposing)
+		{
+			return;
+		}
+
+		// Cancel — revert to original text
+		_isComposing = false;
+		_compositionLength = 0;
+		_compositionStartIndex = 0;
+
+		if (_originalTextBeforeComposition is not null)
+		{
+			_suppressCurrentlyTyping = true;
+			_clearHistoryOnTextChanged = false;
+			_pendingSelection = (_originalSelectionStart, 0);
+			ProcessTextInput(_originalTextBeforeComposition);
+			_clearHistoryOnTextChanged = true;
+			_suppressCurrentlyTyping = false;
+			_originalTextBeforeComposition = null;
+		}
+
+		if (TextBoxView?.DisplayBlock.Visual is { } v) { Visual.Compositor.InvalidateRender(v); }
+	}
+
 	internal bool IsBackwardSelection => _selection.selectionEndsAtTheStart;
 
 	internal TextBoxView TextBoxView => _textBoxView;
@@ -456,6 +574,7 @@ public partial class TextBox
 			{
 				CaretMode = CaretDisplayMode.ThumblessCaretShowing;
 				_textBoxNotificationsSingleton?.OnFocused(this);
+				_imeExtension?.StartImeSession(this);
 				UpdateCanPasteClipboardContent();
 				Clipboard.ContentChanged += OnClipboardContentChanged;
 				_clipboardChangeSubscription.Disposable = Disposable.Create(() => Clipboard.ContentChanged -= OnClipboardContentChanged);
@@ -478,6 +597,7 @@ public partial class TextBox
 
 			if (focusState == FocusState.Unfocused && !_forceFocusedVisualState)
 			{
+				_imeExtension?.EndImeSession();
 				TrySetCurrentlyTyping(false);
 				CaretMode = CaretDisplayMode.ThumblessCaretHidden;
 				if (SelectionFlyout?.IsOpen == true)
@@ -990,6 +1110,12 @@ public partial class TextBox
 				}
 				break;
 			default:
+				// During IME composition, skip normal character insertion.
+				// The IME extension handles text updates via OnImeCompositionUpdated → ProcessTextInput.
+				if (_isComposing)
+				{
+					return;
+				}
 				var isEnterKey = args.UnicodeKey is '\r' or '\n' || args.Key == VirtualKey.Enter;
 				if (!IsReadOnly && !HasPointerCapture && args.UnicodeKey is { } key && (!isEnterKey || AcceptsReturn))
 				{
@@ -1510,6 +1636,18 @@ public partial class TextBox
 	partial void InitializePartial()
 	{
 		_ = ApiExtensibility.CreateInstance(null, out _textBoxNotificationsSingleton);
+
+		if (_imeExtension is null)
+		{
+			_ = ApiExtensibility.CreateInstance(null, out _imeExtension);
+			if (_imeExtension is not null)
+			{
+				_imeExtension.CompositionStarted += (_, _) => OnImeCompositionStarted();
+				_imeExtension.CompositionUpdated += (_, e) => OnImeCompositionUpdated(e.Text);
+				_imeExtension.CompositionCompleted += (_, e) => OnImeCompositionCompleted(e.Text);
+				_imeExtension.CompositionEnded += (_, _) => OnImeCompositionEnded();
+			}
+		}
 	}
 
 	partial void OnTextChangedPartial()
