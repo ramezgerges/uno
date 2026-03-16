@@ -146,6 +146,21 @@ internal partial class X11XamlRootHost
 
 			foreach (var @event in GetEvents(x11Window.Display))
 			{
+				// Let the IME process the event first. If XFilterEvent returns true,
+				// the event was consumed by the input method and should be skipped.
+				var filteredEvent = @event;
+				if (XLib.XFilterEvent(ref filteredEvent, IntPtr.Zero))
+				{
+					// A filtered KeyPress means the IME is composing.
+					// Notify the extension so it can track composition state.
+					if (@event.type == XEventName.KeyPress)
+					{
+						var imeExtension = X11ImeTextBoxExtension.Instance;
+						QueueAction(this, () => imeExtension.OnComposing());
+					}
+					continue;
+				}
+
 				this.LogTrace()?.Trace($"XLIB EVENT: {@event.type}");
 
 				_ = XLib.XQueryTree(x11Window.Display, x11Window.Window, out IntPtr root, out _, out var children, out _);

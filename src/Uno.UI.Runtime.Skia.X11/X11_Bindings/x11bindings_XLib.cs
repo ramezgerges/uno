@@ -259,6 +259,54 @@ namespace Uno.WinUI.Runtime.Skia.X11
 		[LibraryImport(libX11, StringMarshallingCustomType = typeof(AnsiStringMarshaller))]
 		public static partial IntPtr XSetLocaleModifiers(string modifiers);
 
+		// XIM (X Input Method) APIs
+		[LibraryImport(libX11, StringMarshallingCustomType = typeof(AnsiStringMarshaller))]
+		public static partial IntPtr XOpenIM(IntPtr display, IntPtr rdb, string res_name, string res_class);
+
+		[LibraryImport(libX11)]
+		public static partial int XCloseIM(IntPtr im);
+
+		[DllImport(libX11)]
+		public static extern IntPtr XCreateIC(IntPtr im, __arglist);
+
+		[LibraryImport(libX11)]
+		public static partial void XDestroyIC(IntPtr ic);
+
+		[LibraryImport(libX11)]
+		public static partial void XSetICFocus(IntPtr ic);
+
+		[LibraryImport(libX11)]
+		public static partial void XUnsetICFocus(IntPtr ic);
+
+		[LibraryImport(libX11)]
+		[return: MarshalAs(UnmanagedType.Bool)]
+		public static partial bool XFilterEvent(ref XEvent xevent, IntPtr window);
+
+		[LibraryImport(libX11)]
+		public static partial int Xutf8LookupString(IntPtr ic, ref XKeyEvent xevent, byte* buffer, int bytes_buffer, out nint keysym, out int status);
+
+		[DllImport(libX11)]
+		public static extern IntPtr XSetICValues(IntPtr ic, __arglist);
+
+		// XIM constants
+		public const string XNInputStyle = "inputStyle";
+		public const string XNClientWindow = "clientWindow";
+		public const string XNFocusWindow = "focusWindow";
+		public const string XNSpotLocation = "spotLocation";
+		public const string XNPreeditAttributes = "preeditAttributes";
+
+		public const int XIMPreeditNothing = 0x0008;
+		public const int XIMPreeditNone = 0x0010;
+		public const int XIMStatusNothing = 0x0400;
+		public const int XIMStatusNone = 0x0800;
+
+		// Xutf8LookupString status values
+		public const int XBufferOverflow = -1;
+		public const int XLookupNone = 1;
+		public const int XLookupKeySym = 2;
+		public const int XLookupBoth = 3;
+		public const int XLookupChars = 4;
+
 		[LibraryImport(libX11Randr)]
 		public static partial int XRRQueryExtension(IntPtr dpy,
 			out int event_base_return,
