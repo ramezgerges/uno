@@ -22,6 +22,8 @@ internal sealed partial class Win32ImeTextBoxExtension : IImeTextBoxExtension
 {
 	private const uint GCS_COMPSTR = 0x0008;
 	private const uint GCS_RESULTSTR = 0x0800;
+	private const uint NI_COMPOSITIONSTR = 0x0015;
+	private const uint CPS_CANCEL = 0x0004;
 
 	internal static Win32ImeTextBoxExtension Instance { get; } = new();
 
@@ -63,8 +65,16 @@ internal sealed partial class Win32ImeTextBoxExtension : IImeTextBoxExtension
 
 	public void EndImeSession()
 	{
-		if (_isComposing)
+		if (_isComposing && !_hwnd.IsNull)
 		{
+			// Tell the IME to cancel the active composition and close its windows
+			var himc = PInvoke.ImmGetContext(_hwnd);
+			if (!himc.IsNull)
+			{
+				ImmNotifyIME(himc.Value, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
+				PInvoke.ImmReleaseContext(_hwnd, himc);
+			}
+
 			_isComposing = false;
 			CompositionEnded?.Invoke(this, EventArgs.Empty);
 		}
@@ -173,4 +183,8 @@ internal sealed partial class Win32ImeTextBoxExtension : IImeTextBoxExtension
 
 	[LibraryImport("imm32.dll")]
 	private static unsafe partial int ImmGetCompositionStringW(nint hIMC, uint dwIndex, void* lpBuf, uint dwBufLen);
+
+	[LibraryImport("imm32.dll")]
+	[return: MarshalAs(UnmanagedType.Bool)]
+	private static partial bool ImmNotifyIME(nint hIMC, uint dwAction, uint dwIndex, uint dwValue);
 }
