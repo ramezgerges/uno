@@ -26,12 +26,6 @@ internal interface IImeTextBoxExtension
 	void EndImeSession();
 
 	/// <summary>
-	/// Called when the caret position changes in the TextBox.
-	/// The platform should update the IME candidate window position.
-	/// </summary>
-	void UpdateCaretPosition(int x, int y);
-
-	/// <summary>
 	/// Gets whether an IME composition is currently active.
 	/// </summary>
 	bool IsComposing { get; }

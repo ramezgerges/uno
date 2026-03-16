@@ -87,15 +87,6 @@ public partial class TextBox
 	public event TypedEventHandler<TextBox, TextCompositionChangedEventArgs> TextCompositionChanged;
 	public event TypedEventHandler<TextBox, TextCompositionEndedEventArgs> TextCompositionEnded;
 
-	internal void RaiseTextCompositionStarted(int startIndex, int length)
-		=> TextCompositionStarted?.Invoke(this, new TextCompositionStartedEventArgs(startIndex, length));
-
-	internal void RaiseTextCompositionChanged(int startIndex, int length)
-		=> TextCompositionChanged?.Invoke(this, new TextCompositionChangedEventArgs(startIndex, length));
-
-	internal void RaiseTextCompositionEnded(int startIndex, int length)
-		=> TextCompositionEnded?.Invoke(this, new TextCompositionEndedEventArgs(startIndex, length));
-
 	internal bool IsComposing => _isComposing;
 	internal int CompositionStartIndex => _compositionStartIndex;
 	internal int CompositionLength => _compositionLength;
@@ -111,7 +102,7 @@ public partial class TextBox
 		_compositionStartIndex = SelectionStart;
 		_compositionLength = 0;
 
-		RaiseTextCompositionStarted(_compositionStartIndex, _compositionLength);
+		TextCompositionStarted?.Invoke(this, new TextCompositionStartedEventArgs(_compositionStartIndex, 0));
 	}
 
 	private void OnImeCompositionUpdated(string compositionText)
@@ -121,19 +112,11 @@ public partial class TextBox
 			return;
 		}
 
-		var text = Text;
-		var newText = text[.._compositionStartIndex] + compositionText + text[(_compositionStartIndex + _compositionLength)..];
+		ReplaceCompositionText(compositionText);
 		_compositionLength = compositionText.Length;
 
-		_suppressCurrentlyTyping = true;
-		_clearHistoryOnTextChanged = false;
-		_pendingSelection = (_compositionStartIndex + _compositionLength, 0);
-		ProcessTextInput(newText);
-		_clearHistoryOnTextChanged = true;
-		_suppressCurrentlyTyping = false;
-
-		RaiseTextCompositionChanged(_compositionStartIndex, _compositionLength);
-		if (TextBoxView?.DisplayBlock.Visual is { } v) { Visual.Compositor.InvalidateRender(v); }
+		TextCompositionChanged?.Invoke(this, new TextCompositionChangedEventArgs(_compositionStartIndex, _compositionLength));
+		InvalidateTextBoxRender();
 	}
 
 	private void OnImeCompositionCompleted(string committedText)
@@ -143,24 +126,16 @@ public partial class TextBox
 			return;
 		}
 
-		var text = Text;
-		var newText = text[.._compositionStartIndex] + committedText + text[(_compositionStartIndex + _compositionLength)..];
-		var committedLength = committedText.Length;
-
-		_compositionLength = 0;
-		_isComposing = false;
-
 		TrySetCurrentlyTyping(true);
-		_suppressCurrentlyTyping = true;
-		_clearHistoryOnTextChanged = false;
-		_pendingSelection = (_compositionStartIndex + committedLength, 0);
-		ProcessTextInput(newText);
-		_clearHistoryOnTextChanged = true;
-		_suppressCurrentlyTyping = false;
+		ReplaceCompositionText(committedText);
 
-		RaiseTextCompositionEnded(_compositionStartIndex, committedLength);
+		var committedLength = committedText.Length;
+		_isComposing = false;
+		_compositionLength = 0;
 		_compositionStartIndex = 0;
-		if (TextBoxView?.DisplayBlock.Visual is { } v) { Visual.Compositor.InvalidateRender(v); }
+
+		TextCompositionEnded?.Invoke(this, new TextCompositionEndedEventArgs(_compositionStartIndex, committedLength));
+		InvalidateTextBoxRender();
 	}
 
 	private void OnImeCompositionEnded()
@@ -170,14 +145,34 @@ public partial class TextBox
 			return;
 		}
 
-		// Composition ended — keep text as-is (matches WinUI behavior).
-		// The composition text was already inserted via ProcessTextInput
-		// during OnImeCompositionUpdated, so just clear composition state.
+		// Composition ended without explicit commit — keep text as-is (matches WinUI behavior).
+		// The composition text was already inserted via ProcessTextInput during OnImeCompositionUpdated.
 		_isComposing = false;
 		_compositionLength = 0;
 		_compositionStartIndex = 0;
 
-		if (TextBoxView?.DisplayBlock.Visual is { } v) { Visual.Compositor.InvalidateRender(v); }
+		InvalidateTextBoxRender();
+	}
+
+	private void ReplaceCompositionText(string newText)
+	{
+		var text = Text;
+		var replaced = text[.._compositionStartIndex] + newText + text[(_compositionStartIndex + _compositionLength)..];
+
+		_suppressCurrentlyTyping = true;
+		_clearHistoryOnTextChanged = false;
+		_pendingSelection = (_compositionStartIndex + newText.Length, 0);
+		ProcessTextInput(replaced);
+		_clearHistoryOnTextChanged = true;
+		_suppressCurrentlyTyping = false;
+	}
+
+	private void InvalidateTextBoxRender()
+	{
+		if (TextBoxView?.DisplayBlock.Visual is { } visual)
+		{
+			Visual.Compositor.InvalidateRender(visual);
+		}
 	}
 
 	internal bool IsBackwardSelection => _selection.selectionEndsAtTheStart;

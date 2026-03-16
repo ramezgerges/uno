@@ -67,7 +67,7 @@ internal sealed partial class Win32ImeTextBoxExtension : IImeTextBoxExtension
 	{
 		if (_isComposing && !_hwnd.IsNull)
 		{
-			// Tell the IME to cancel the active composition and close its windows
+			// Tell the IME to commit the active composition and close its windows
 			var himc = PInvoke.ImmGetContext(_hwnd);
 			if (!himc.IsNull)
 			{
@@ -80,12 +80,6 @@ internal sealed partial class Win32ImeTextBoxExtension : IImeTextBoxExtension
 		}
 
 		_hwnd = HWND.Null;
-	}
-
-	public void UpdateCaretPosition(int x, int y)
-	{
-		// Caret positioning is already handled by Win32ImeCaretManager
-		// via the Win32TextBoxNotificationsProviderSingleton.
 	}
 
 	/// <summary>
