@@ -81,8 +81,6 @@ public partial class TextBox
 	private bool _isComposing;
 	private int _compositionStartIndex;
 	private int _compositionLength;
-	private string _originalTextBeforeComposition;
-	private int _originalSelectionStart;
 
 	// IME composition events
 	public event TypedEventHandler<TextBox, TextCompositionStartedEventArgs> TextCompositionStarted;
@@ -110,8 +108,6 @@ public partial class TextBox
 		}
 
 		_isComposing = true;
-		_originalTextBeforeComposition = Text;
-		_originalSelectionStart = SelectionStart;
 		_compositionStartIndex = SelectionStart;
 		_compositionLength = 0;
 
@@ -164,7 +160,6 @@ public partial class TextBox
 
 		RaiseTextCompositionEnded(_compositionStartIndex, committedLength);
 		_compositionStartIndex = 0;
-		_originalTextBeforeComposition = null;
 		if (TextBoxView?.DisplayBlock.Visual is { } v) { Visual.Compositor.InvalidateRender(v); }
 	}
 
@@ -181,7 +176,6 @@ public partial class TextBox
 		_isComposing = false;
 		_compositionLength = 0;
 		_compositionStartIndex = 0;
-		_originalTextBeforeComposition = null;
 
 		if (TextBoxView?.DisplayBlock.Visual is { } v) { Visual.Compositor.InvalidateRender(v); }
 	}
