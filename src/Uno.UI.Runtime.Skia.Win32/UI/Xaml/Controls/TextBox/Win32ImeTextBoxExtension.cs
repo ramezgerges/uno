@@ -23,7 +23,7 @@ internal sealed partial class Win32ImeTextBoxExtension : IImeTextBoxExtension
 	private const uint GCS_COMPSTR = 0x0008;
 	private const uint GCS_RESULTSTR = 0x0800;
 	private const uint NI_COMPOSITIONSTR = 0x0015;
-	private const uint CPS_CANCEL = 0x0004;
+	private const uint CPS_COMPLETE = 0x0001;
 
 	internal static Win32ImeTextBoxExtension Instance { get; } = new();
 
@@ -71,7 +71,7 @@ internal sealed partial class Win32ImeTextBoxExtension : IImeTextBoxExtension
 			var himc = PInvoke.ImmGetContext(_hwnd);
 			if (!himc.IsNull)
 			{
-				ImmNotifyIME(himc.Value, NI_COMPOSITIONSTR, CPS_CANCEL, 0);
+				ImmNotifyIME(himc.Value, NI_COMPOSITIONSTR, CPS_COMPLETE, 0);
 				PInvoke.ImmReleaseContext(_hwnd, himc);
 			}
 

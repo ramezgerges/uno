@@ -175,21 +175,13 @@ public partial class TextBox
 			return;
 		}
 
-		// Cancel — revert to original text
+		// Composition ended — keep text as-is (matches WinUI behavior).
+		// The composition text was already inserted via ProcessTextInput
+		// during OnImeCompositionUpdated, so just clear composition state.
 		_isComposing = false;
 		_compositionLength = 0;
 		_compositionStartIndex = 0;
-
-		if (_originalTextBeforeComposition is not null)
-		{
-			_suppressCurrentlyTyping = true;
-			_clearHistoryOnTextChanged = false;
-			_pendingSelection = (_originalSelectionStart, 0);
-			ProcessTextInput(_originalTextBeforeComposition);
-			_clearHistoryOnTextChanged = true;
-			_suppressCurrentlyTyping = false;
-			_originalTextBeforeComposition = null;
-		}
+		_originalTextBeforeComposition = null;
 
 		if (TextBoxView?.DisplayBlock.Visual is { } v) { Visual.Compositor.InvalidateRender(v); }
 	}
