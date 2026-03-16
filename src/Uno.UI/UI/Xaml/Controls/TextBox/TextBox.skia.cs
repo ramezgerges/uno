@@ -77,6 +77,7 @@ public partial class TextBox
 
 	// IME composition state
 	private static IImeTextBoxExtension _imeExtension;
+	private static TextBox _activeImeTextBox;
 	private bool _isComposing;
 	private int _compositionStartIndex;
 	private int _compositionLength;
@@ -574,6 +575,7 @@ public partial class TextBox
 			{
 				CaretMode = CaretDisplayMode.ThumblessCaretShowing;
 				_textBoxNotificationsSingleton?.OnFocused(this);
+				_activeImeTextBox = this;
 				_imeExtension?.StartImeSession(this);
 				UpdateCanPasteClipboardContent();
 				Clipboard.ContentChanged += OnClipboardContentChanged;
@@ -598,6 +600,10 @@ public partial class TextBox
 			if (focusState == FocusState.Unfocused && !_forceFocusedVisualState)
 			{
 				_imeExtension?.EndImeSession();
+				if (_activeImeTextBox == this)
+				{
+					_activeImeTextBox = null;
+				}
 				TrySetCurrentlyTyping(false);
 				CaretMode = CaretDisplayMode.ThumblessCaretHidden;
 				if (SelectionFlyout?.IsOpen == true)
@@ -1642,10 +1648,10 @@ public partial class TextBox
 			_ = ApiExtensibility.CreateInstance(null, out _imeExtension);
 			if (_imeExtension is not null)
 			{
-				_imeExtension.CompositionStarted += (_, _) => OnImeCompositionStarted();
-				_imeExtension.CompositionUpdated += (_, e) => OnImeCompositionUpdated(e.Text);
-				_imeExtension.CompositionCompleted += (_, e) => OnImeCompositionCompleted(e.Text);
-				_imeExtension.CompositionEnded += (_, _) => OnImeCompositionEnded();
+				_imeExtension.CompositionStarted += (_, _) => _activeImeTextBox?.OnImeCompositionStarted();
+				_imeExtension.CompositionUpdated += (_, e) => _activeImeTextBox?.OnImeCompositionUpdated(e.Text);
+				_imeExtension.CompositionCompleted += (_, e) => _activeImeTextBox?.OnImeCompositionCompleted(e.Text);
+				_imeExtension.CompositionEnded += (_, _) => _activeImeTextBox?.OnImeCompositionEnded();
 			}
 		}
 	}
