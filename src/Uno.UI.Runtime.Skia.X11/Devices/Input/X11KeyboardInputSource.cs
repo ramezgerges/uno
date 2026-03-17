@@ -47,27 +47,25 @@ internal class X11KeyboardInputSource : IUnoKeyboardInputSource
 
 			switch (status)
 			{
-				case XLib.XLookupChars:
 				case XLib.XLookupBoth:
-					// IME committed text
+					// Regular key press with text — handle as normal KeyDown with unicodeKey.
+					// Do NOT route through IME composition path to avoid double insertion.
+					symbols = System.Text.Encoding.UTF8.GetString(buffer, nbytes);
+					if (string.IsNullOrEmpty(symbols))
+					{
+						symbols = null;
+					}
+					break;
+
+				case XLib.XLookupChars:
+					// IME committed text (no keysym) — route through composition events.
 					var committed = System.Text.Encoding.UTF8.GetString(buffer, nbytes);
 					if (!string.IsNullOrEmpty(committed))
 					{
 						var imeExtension = X11ImeTextBoxExtension.Instance;
 						X11XamlRootHost.QueueAction(_host, () => imeExtension.OnCommittedText(committed));
-
-						// For XLookupBoth, we also have a keysym — use it for the key event
-						if (status == XLib.XLookupBoth)
-						{
-							symbols = committed;
-						}
-						else
-						{
-							// XLookupChars only — no keysym, just committed text.
-							// Still raise key events so the input pipeline processes them.
-							symbols = committed;
-						}
 					}
+					// Don't set symbols — text is handled by composition events, not KeyDown.
 					break;
 
 				case XLib.XLookupKeySym:
