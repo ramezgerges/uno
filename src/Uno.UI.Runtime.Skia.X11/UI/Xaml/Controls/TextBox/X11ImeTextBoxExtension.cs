@@ -219,7 +219,8 @@ internal sealed class X11ImeTextBoxExtension : IImeTextBoxExtension
 	}
 
 	/// <summary>
-	/// Updates the candidate window position by setting the XIC spot location.
+	/// Updates the candidate window position by setting the XIC spot location
+	/// via XNPreeditAttributes nested list.
 	/// </summary>
 	internal void UpdateSpotLocation(short x, short y)
 	{
@@ -229,9 +230,19 @@ internal sealed class X11ImeTextBoxExtension : IImeTextBoxExtension
 		}
 
 		var point = new XPoint { X = x, Y = y };
-		using var _ = X11Helper.XLock(_currentDisplay);
-		XLib.XSetICValues(_currentXic,
-			XLib.XNSpotLocation, ref point, IntPtr.Zero);
+		using var lockDisposable = X11Helper.XLock(_currentDisplay);
+
+		var preeditAttr = XLib.XVaCreateNestedList(0,
+			XLib.XNSpotLocation, ref point,
+			IntPtr.Zero);
+
+		if (preeditAttr != IntPtr.Zero)
+		{
+			XLib.XSetICValues(_currentXic,
+				XLib.XNPreeditAttributes, preeditAttr,
+				IntPtr.Zero);
+			_ = XLib.XFree(preeditAttr);
+		}
 	}
 
 	/// <summary>

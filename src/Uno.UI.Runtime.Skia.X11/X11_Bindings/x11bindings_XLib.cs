@@ -314,11 +314,18 @@ namespace Uno.WinUI.Runtime.Skia.X11
 		public static partial int Xutf8LookupString(IntPtr ic, ref XKeyEvent xevent, byte* buffer, int bytes_buffer, out nint keysym, out int status);
 
 		// XSetICValues is vararg in C, but __arglist is not supported on Linux .NET.
-		// Fixed-signature overload for setting XNSpotLocation (XPoint*).
+		// Fixed-signature overload for setting a preedit attribute (nested list).
 		[DllImport(libX11, EntryPoint = "XSetICValues")]
 		public static extern IntPtr XSetICValues(
 			IntPtr ic,
-			string attrName, ref XPoint attrValue,
+			string attrName, IntPtr attrValue,
+			IntPtr terminator);
+
+		// XVaCreateNestedList overload for a single XPoint attribute (e.g., XNSpotLocation).
+		[DllImport(libX11, EntryPoint = "XVaCreateNestedList")]
+		public static extern IntPtr XVaCreateNestedList(
+			int dummy,
+			string spotLocationName, ref XPoint spotLocation,
 			IntPtr terminator);
 
 		// XIM constants

@@ -62,7 +62,7 @@ internal sealed class X11TextBoxNotificationsProviderSingleton : ITextBoxNotific
 		var index = textBox.IsBackwardSelection ? textBox.SelectionStart : textBox.SelectionStart + textBox.SelectionLength;
 		var rect = textBoxView.DisplayBlock.ParsedText.GetRectForIndex(index);
 		var transform = textBoxView.DisplayBlock.TransformToVisual(null);
-		var point = transform.TransformPoint(new Point(rect.Left, rect.Top));
+		var point = transform.TransformPoint(new Point(rect.Left, rect.Top + rect.Height));
 		var scale = textBox.XamlRoot.RasterizationScale;
 
 		X11ImeTextBoxExtension.Instance.UpdateSpotLocation(
