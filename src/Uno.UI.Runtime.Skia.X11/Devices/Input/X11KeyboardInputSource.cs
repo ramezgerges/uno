@@ -48,34 +48,43 @@ internal class X11KeyboardInputSource : IUnoKeyboardInputSource
 				buffer = largeBuffer;
 			}
 
+			var lookupText = nbytes > 0 ? System.Text.Encoding.UTF8.GetString(buffer, nbytes) : null;
+
 			if (this.Log().IsEnabled(LogLevel.Trace))
 			{
-				this.Log().Trace($"ProcessKeyboardEvent pressed={pressed}: keycode={keyEvent.keycode} keySym={keySym} status={status} nbytes={nbytes}");
+				this.Log().Trace($"ProcessKeyboardEvent pressed={pressed}: keycode={keyEvent.keycode} keySym={keySym} status={status} nbytes={nbytes} text='{lookupText}'");
 			}
 
 			switch (status)
 			{
 				case XLib.XLookupBoth:
 					// Keysym + text — regular key forwarded by IME (e.g., ASCII in English mode).
-					symbols = System.Text.Encoding.UTF8.GetString(buffer, nbytes);
-					if (string.IsNullOrEmpty(symbols))
+					if (!string.IsNullOrEmpty(lookupText))
 					{
-						symbols = null;
+						symbols = lookupText;
 					}
 					break;
 
 				case XLib.XLookupChars:
 					// Text only (no keysym) — IME committed text.
-					var committed = System.Text.Encoding.UTF8.GetString(buffer, nbytes);
-					if (!string.IsNullOrEmpty(committed))
+					if (!string.IsNullOrEmpty(lookupText))
 					{
 						var imeExtension = X11ImeTextBoxExtension.Instance;
-						X11XamlRootHost.QueueAction(_host, () => imeExtension.OnCommittedText(committed));
+						X11XamlRootHost.QueueAction(_host, () => imeExtension.OnCommittedText(lookupText));
 					}
 					return;
 
 				case XLib.XLookupKeySym:
-					// Key only, no text — proceed to KeyDown without unicode character.
+					// Keysym only. However, some IMEs (e.g., IBus) put committed text
+					// in the buffer even with this status. If we have text, treat it
+					// as a commit.
+					if (!string.IsNullOrEmpty(lookupText))
+					{
+						var imeExtension = X11ImeTextBoxExtension.Instance;
+						X11XamlRootHost.QueueAction(_host, () => imeExtension.OnCommittedText(lookupText));
+						return;
+					}
+					// No text — proceed to KeyDown without unicode character.
 					break;
 
 				case XLib.XLookupNone:
