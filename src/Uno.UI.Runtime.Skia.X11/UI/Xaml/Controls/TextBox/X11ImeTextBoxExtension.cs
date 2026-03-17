@@ -117,6 +117,11 @@ internal sealed class X11ImeTextBoxExtension : IImeTextBoxExtension
 			{
 				_currentXic = CreateXicWithPreeditCallbacks();
 
+				if (this.Log().IsEnabled(LogLevel.Debug))
+				{
+					this.Log().Debug($"XCreateIC with XIMPreeditCallbacks: {(_currentXic != IntPtr.Zero ? "succeeded" : "failed")}");
+				}
+
 				if (_currentXic == IntPtr.Zero)
 				{
 					// Fall back to XIMPreeditNothing if callbacks are not supported.

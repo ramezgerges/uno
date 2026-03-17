@@ -71,18 +71,20 @@ internal class X11KeyboardInputSource : IUnoKeyboardInputSource
 
 				case XLib.XLookupChars:
 					// Text only (no keysym) — IME committed text.
-					if (!string.IsNullOrEmpty(lookupText))
+					if (!string.IsNullOrEmpty(lookupText) && !char.IsControl(lookupText[0]))
 					{
 						var imeExtension = X11ImeTextBoxExtension.Instance;
 						X11XamlRootHost.QueueAction(_host, () => imeExtension.OnCommittedText(lookupText));
+						return;
 					}
+					// Control character or empty — ignore, let KeyDown handle it via keySym.
 					return;
 
 				case XLib.XLookupKeySym:
 					// Keysym only. However, some IMEs (e.g., IBus) put committed text
 					// in the buffer even with this status. If we have text, treat it
 					// as a commit.
-					if (!string.IsNullOrEmpty(lookupText))
+					if (!string.IsNullOrEmpty(lookupText) && !char.IsControl(lookupText[0]))
 					{
 						var imeExtension = X11ImeTextBoxExtension.Instance;
 						X11XamlRootHost.QueueAction(_host, () => imeExtension.OnCommittedText(lookupText));
