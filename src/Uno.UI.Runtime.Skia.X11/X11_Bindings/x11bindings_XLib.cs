@@ -321,11 +321,11 @@ namespace Uno.WinUI.Runtime.Skia.X11
 			string attrName, IntPtr attrValue,
 			IntPtr terminator);
 
-		// XVaCreateNestedList overload for a single XPoint attribute (e.g., XNSpotLocation).
+		// XVaCreateNestedList overload for a single pointer attribute (e.g., XNSpotLocation with XPoint*).
 		[DllImport(libX11, EntryPoint = "XVaCreateNestedList")]
 		public static extern IntPtr XVaCreateNestedList(
 			int dummy,
-			string spotLocationName, ref XPoint spotLocation,
+			string attrName, IntPtr attrValue,
 			IntPtr terminator);
 
 		// XIM constants

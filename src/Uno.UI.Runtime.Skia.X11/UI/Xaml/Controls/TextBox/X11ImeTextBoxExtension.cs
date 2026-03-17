@@ -248,20 +248,31 @@ internal sealed class X11ImeTextBoxExtension : IImeTextBoxExtension
 		}
 
 		_spotLocationPending = false;
-		var point = new XPoint { X = _pendingSpotX, Y = _pendingSpotY };
 
-		using var lockDisposable = X11Helper.XLock(_currentDisplay);
-
-		var preeditAttr = XLib.XVaCreateNestedList(0,
-			XLib.XNSpotLocation, ref point,
-			IntPtr.Zero);
-
-		if (preeditAttr != IntPtr.Zero)
+		// Allocate XPoint on unmanaged heap — XVaCreateNestedList is varargs
+		// and ref parameters don't work reliably with varargs P/Invoke.
+		var pointPtr = Marshal.AllocHGlobal(Marshal.SizeOf<XPoint>());
+		try
 		{
-			XLib.XSetICValues(_currentXic,
-				XLib.XNPreeditAttributes, preeditAttr,
+			Marshal.StructureToPtr(new XPoint { X = _pendingSpotX, Y = _pendingSpotY }, pointPtr, false);
+
+			using var lockDisposable = X11Helper.XLock(_currentDisplay);
+
+			var preeditAttr = XLib.XVaCreateNestedList(0,
+				XLib.XNSpotLocation, pointPtr,
 				IntPtr.Zero);
-			_ = XLib.XFree(preeditAttr);
+
+			if (preeditAttr != IntPtr.Zero)
+			{
+				XLib.XSetICValues(_currentXic,
+					XLib.XNPreeditAttributes, preeditAttr,
+					IntPtr.Zero);
+				_ = XLib.XFree(preeditAttr);
+			}
+		}
+		finally
+		{
+			Marshal.FreeHGlobal(pointPtr);
 		}
 	}
 
