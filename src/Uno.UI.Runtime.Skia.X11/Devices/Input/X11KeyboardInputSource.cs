@@ -24,6 +24,42 @@ internal class X11KeyboardInputSource : IUnoKeyboardInputSource
 		_host.SetKeyboardSource(this);
 	}
 
+	/// <summary>
+	/// Called from the event loop when XFilterEvent returns true for a KeyPress.
+	/// Checks if the IME committed text synchronously during filtering.
+	/// </summary>
+	internal unsafe void ProcessFilteredKeyEvent(XKeyEvent keyEvent)
+	{
+		var xic = X11ImeTextBoxExtension.GetXicForWindow(keyEvent.window);
+		if (xic == IntPtr.Zero)
+		{
+			return;
+		}
+
+		var buffer = stackalloc byte[64];
+		int nbytes = XLib.Xutf8LookupString(xic, ref keyEvent, buffer, 64, out _, out var status);
+
+		if ((status == XLib.XLookupChars || status == XLib.XLookupBoth) && nbytes > 0)
+		{
+			var committed = System.Text.Encoding.UTF8.GetString(buffer, nbytes);
+			if (!string.IsNullOrEmpty(committed))
+			{
+				if (this.Log().IsEnabled(LogLevel.Trace))
+				{
+					this.Log().Trace($"ProcessFilteredKeyEvent: IME committed '{committed}' during XFilterEvent");
+				}
+
+				var imeExtension = X11ImeTextBoxExtension.Instance;
+				X11XamlRootHost.QueueAction(_host, () => imeExtension.OnCommittedText(committed));
+				return;
+			}
+		}
+
+		// No committed text — IME is composing
+		var ime = X11ImeTextBoxExtension.Instance;
+		X11XamlRootHost.QueueAction(_host, () => ime.OnComposing());
+	}
+
 	internal unsafe void ProcessKeyboardEvent(XKeyEvent keyEvent, bool pressed)
 	{
 		var xic = X11ImeTextBoxExtension.GetXicForWindow(keyEvent.window);

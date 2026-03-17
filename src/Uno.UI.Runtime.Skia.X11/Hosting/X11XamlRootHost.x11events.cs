@@ -151,12 +151,12 @@ internal partial class X11XamlRootHost
 				var filteredEvent = @event;
 				if (XLib.XFilterEvent(ref filteredEvent, IntPtr.Zero))
 				{
-					// A filtered KeyPress means the IME is composing.
-					// Notify the extension so it can track composition state.
+					// For filtered KeyPress events, check if the IME committed text
+					// synchronously during XFilterEvent (common with IBus).
+					// If no committed text, treat as composition in progress.
 					if (@event.type == XEventName.KeyPress)
 					{
-						var imeExtension = X11ImeTextBoxExtension.Instance;
-						QueueAction(this, () => imeExtension.OnComposing());
+						_keyboardSource?.ProcessFilteredKeyEvent(@event.KeyEvent);
 					}
 					continue;
 				}
