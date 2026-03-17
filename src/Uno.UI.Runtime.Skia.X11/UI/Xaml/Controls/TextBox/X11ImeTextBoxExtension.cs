@@ -42,6 +42,12 @@ internal sealed class X11ImeTextBoxExtension : IImeTextBoxExtension
 	// The host for dispatching UI-thread actions.
 	private X11XamlRootHost? _currentHost;
 
+	// Pending spot location to be applied from the event thread.
+	// XSetICValues must not be called from the UI thread while the event thread uses the XIC.
+	private volatile bool _spotLocationPending;
+	private short _pendingSpotX;
+	private short _pendingSpotY;
+
 	private IntPtr _currentDisplay;
 	private IntPtr _currentWindow;
 	private IntPtr _currentXic;
@@ -219,17 +225,31 @@ internal sealed class X11ImeTextBoxExtension : IImeTextBoxExtension
 	}
 
 	/// <summary>
-	/// Updates the candidate window position by setting the XIC spot location
-	/// via XNPreeditAttributes nested list.
+	/// Stores the desired spot location. The actual XSetICValues call is deferred
+	/// to the event thread via <see cref="FlushPendingSpotLocation"/> to avoid
+	/// concurrent XIC access from the UI thread and the X11 event thread.
 	/// </summary>
 	internal void UpdateSpotLocation(short x, short y)
 	{
-		if (_currentXic == IntPtr.Zero)
+		_pendingSpotX = x;
+		_pendingSpotY = y;
+		_spotLocationPending = true;
+	}
+
+	/// <summary>
+	/// Applies any pending spot location update. Must be called from the X11 event thread
+	/// (e.g., during <see cref="X11KeyboardInputSource.ProcessKeyboardEvent"/>).
+	/// </summary>
+	internal void FlushPendingSpotLocation()
+	{
+		if (!_spotLocationPending || _currentXic == IntPtr.Zero)
 		{
 			return;
 		}
 
-		var point = new XPoint { X = x, Y = y };
+		_spotLocationPending = false;
+		var point = new XPoint { X = _pendingSpotX, Y = _pendingSpotY };
+
 		using var lockDisposable = X11Helper.XLock(_currentDisplay);
 
 		var preeditAttr = XLib.XVaCreateNestedList(0,

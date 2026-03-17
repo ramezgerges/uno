@@ -26,6 +26,10 @@ internal class X11KeyboardInputSource : IUnoKeyboardInputSource
 
 	internal unsafe void ProcessKeyboardEvent(XKeyEvent keyEvent, bool pressed)
 	{
+		// Apply any pending spot location update from the UI thread.
+		// This must happen on the event thread to avoid concurrent XIC access.
+		X11ImeTextBoxExtension.Instance.FlushPendingSpotLocation();
+
 		var xic = X11ImeTextBoxExtension.GetXicForWindow(keyEvent.window);
 
 		string? symbols = null;
