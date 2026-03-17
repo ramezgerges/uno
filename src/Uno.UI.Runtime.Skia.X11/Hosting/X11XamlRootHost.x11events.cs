@@ -147,18 +147,19 @@ internal partial class X11XamlRootHost
 			foreach (var @event in GetEvents(x11Window.Display))
 			{
 				// Let the IME process the event first via XFilterEvent.
-				// For KeyPress events, we always call ProcessKeyboardEvent afterward
-				// because Xutf8LookupString retrieves the IME result from the XIC
-				// regardless of whether XFilterEvent consumed the event.
-				// Non-KeyPress filtered events are skipped.
+				// Filtered events are fully consumed by the IME — do NOT call
+				// Xutf8LookupString on them (it returns per-keystroke text, not
+				// commit text). Instead, just signal that composition is active.
+				// When the IME commits, it synthesizes a new non-filtered KeyPress
+				// that Xutf8LookupString will return XLookupChars for.
 				var filteredEvent = @event;
 				bool imeFiltered = XLib.XFilterEvent(ref filteredEvent, IntPtr.Zero);
 				if (imeFiltered)
 				{
 					if (@event.type == XEventName.KeyPress)
 					{
-						// Always process filtered KeyPress through Xutf8LookupString
-						_keyboardSource?.ProcessKeyboardEvent(@event.KeyEvent, true, imeFiltered: true);
+						// Signal that the IME is composing (for TextBox state tracking)
+						X11XamlRootHost.QueueAction(this, () => X11ImeTextBoxExtension.Instance.OnComposing());
 					}
 					continue;
 				}

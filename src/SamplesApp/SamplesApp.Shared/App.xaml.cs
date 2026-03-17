@@ -530,7 +530,8 @@ namespace SamplesApp
 				builder.AddFilter("Uno.WinUI.Runtime.Skia", LogLevel.Debug);
 				builder.AddFilter("Uno.UI.Skia", LogLevel.Debug);
 
-				// builder.AddFilter("Uno.UI.Runtime.Skia", LogLevel.Trace);
+				builder.AddFilter("Uno.UI.Runtime.Skia", LogLevel.Trace);
+				builder.AddFilter("Uno.WinUI.Runtime.Skia.X11", LogLevel.Trace);
 
 				// builder.AddFilter("Uno.Foundation.WebAssemblyRuntime", LogLevel.Debug );
 				// builder.AddFilter("Microsoft.UI.Xaml.Controls.PopupPanel", LogLevel.Debug );
