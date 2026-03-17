@@ -267,7 +267,7 @@ namespace Uno.WinUI.Runtime.Skia.X11
 		public static partial int XCloseIM(IntPtr im);
 
 		// XCreateIC is vararg in C, but __arglist is not supported on Linux .NET.
-		// We define a fixed-signature overload for the specific parameter combination we use.
+		// We define fixed-signature overloads for specific parameter combinations.
 		// On x86_64 System V ABI, this is safe for integer/pointer-only arguments.
 		[DllImport(libX11, EntryPoint = "XCreateIC")]
 		public static extern IntPtr XCreateIC(
@@ -275,6 +275,26 @@ namespace Uno.WinUI.Runtime.Skia.X11
 			string inputStyle, IntPtr inputStyleValue,
 			string clientWindow, IntPtr clientWindowValue,
 			string focusWindow, IntPtr focusWindowValue,
+			IntPtr terminator);
+
+		// Overload for XIMPreeditCallbacks style (includes preedit attributes nested list).
+		[DllImport(libX11, EntryPoint = "XCreateIC")]
+		public static extern IntPtr XCreateIC(
+			IntPtr im,
+			string inputStyle, IntPtr inputStyleValue,
+			string clientWindow, IntPtr clientWindowValue,
+			string focusWindow, IntPtr focusWindowValue,
+			string preeditAttributes, IntPtr preeditAttributesValue,
+			IntPtr terminator);
+
+		// XVaCreateNestedList is vararg in C. Fixed-signature overload for 4 preedit callbacks.
+		[DllImport(libX11, EntryPoint = "XVaCreateNestedList")]
+		public static extern IntPtr XVaCreateNestedList(
+			int dummy,
+			string startCbName, IntPtr startCb,
+			string doneCbName, IntPtr doneCb,
+			string drawCbName, IntPtr drawCb,
+			string caretCbName, IntPtr caretCb,
 			IntPtr terminator);
 
 		[LibraryImport(libX11)]
@@ -308,6 +328,7 @@ namespace Uno.WinUI.Runtime.Skia.X11
 		public const string XNSpotLocation = "spotLocation";
 		public const string XNPreeditAttributes = "preeditAttributes";
 
+		public const int XIMPreeditCallbacks = 0x0002;
 		public const int XIMPreeditNothing = 0x0008;
 		public const int XIMPreeditNone = 0x0010;
 		public const int XIMStatusNothing = 0x0400;
