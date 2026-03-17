@@ -146,17 +146,19 @@ internal partial class X11XamlRootHost
 
 			foreach (var @event in GetEvents(x11Window.Display))
 			{
-				// Let the IME process the event first. If XFilterEvent returns true,
-				// the event was consumed by the input method and should be skipped.
+				// Let the IME process the event first via XFilterEvent.
+				// For KeyPress events, we always call ProcessKeyboardEvent afterward
+				// because Xutf8LookupString retrieves the IME result from the XIC
+				// regardless of whether XFilterEvent consumed the event.
+				// Non-KeyPress filtered events are skipped.
 				var filteredEvent = @event;
-				if (XLib.XFilterEvent(ref filteredEvent, IntPtr.Zero))
+				bool imeFiltered = XLib.XFilterEvent(ref filteredEvent, IntPtr.Zero);
+				if (imeFiltered)
 				{
-					// For filtered KeyPress events, check if the IME committed text
-					// synchronously during XFilterEvent (common with IBus).
-					// If no committed text, treat as composition in progress.
 					if (@event.type == XEventName.KeyPress)
 					{
-						_keyboardSource?.ProcessFilteredKeyEvent(@event.KeyEvent);
+						// Always process filtered KeyPress through Xutf8LookupString
+						_keyboardSource?.ProcessKeyboardEvent(@event.KeyEvent, true, imeFiltered: true);
 					}
 					continue;
 				}

@@ -24,43 +24,7 @@ internal class X11KeyboardInputSource : IUnoKeyboardInputSource
 		_host.SetKeyboardSource(this);
 	}
 
-	/// <summary>
-	/// Called from the event loop when XFilterEvent returns true for a KeyPress.
-	/// Checks if the IME committed text synchronously during filtering.
-	/// </summary>
-	internal unsafe void ProcessFilteredKeyEvent(XKeyEvent keyEvent)
-	{
-		var xic = X11ImeTextBoxExtension.GetXicForWindow(keyEvent.window);
-		if (xic == IntPtr.Zero)
-		{
-			return;
-		}
-
-		var buffer = stackalloc byte[64];
-		int nbytes = XLib.Xutf8LookupString(xic, ref keyEvent, buffer, 64, out _, out var status);
-
-		if ((status == XLib.XLookupChars || status == XLib.XLookupBoth) && nbytes > 0)
-		{
-			var committed = System.Text.Encoding.UTF8.GetString(buffer, nbytes);
-			if (!string.IsNullOrEmpty(committed))
-			{
-				if (this.Log().IsEnabled(LogLevel.Trace))
-				{
-					this.Log().Trace($"ProcessFilteredKeyEvent: IME committed '{committed}' during XFilterEvent");
-				}
-
-				var imeExtension = X11ImeTextBoxExtension.Instance;
-				X11XamlRootHost.QueueAction(_host, () => imeExtension.OnCommittedText(committed));
-				return;
-			}
-		}
-
-		// No committed text — IME is composing
-		var ime = X11ImeTextBoxExtension.Instance;
-		X11XamlRootHost.QueueAction(_host, () => ime.OnComposing());
-	}
-
-	internal unsafe void ProcessKeyboardEvent(XKeyEvent keyEvent, bool pressed)
+	internal unsafe void ProcessKeyboardEvent(XKeyEvent keyEvent, bool pressed, bool imeFiltered = false)
 	{
 		var xic = X11ImeTextBoxExtension.GetXicForWindow(keyEvent.window);
 
@@ -69,23 +33,29 @@ internal class X11KeyboardInputSource : IUnoKeyboardInputSource
 
 		if (xic != IntPtr.Zero && pressed)
 		{
-			// Use Xutf8LookupString for IME-aware text lookup
+			// Use Xutf8LookupString for IME-aware text lookup.
+			// This is called for both filtered and non-filtered events:
+			// XFilterEvent dispatches to the IME, Xutf8LookupString reads back the result.
 			var buffer = stackalloc byte[64];
 			int nbytes = XLib.Xutf8LookupString(xic, ref keyEvent, buffer, 64, out keySym, out var status);
 
 			if (status == XLib.XBufferOverflow)
 			{
-				// Buffer too small — allocate larger and retry
 				var largeBuffer = stackalloc byte[nbytes + 1];
 				nbytes = XLib.Xutf8LookupString(xic, ref keyEvent, largeBuffer, nbytes + 1, out keySym, out status);
 				buffer = largeBuffer;
 			}
 
+			if (this.Log().IsEnabled(LogLevel.Trace))
+			{
+				this.Log().Trace($"ProcessKeyboardEvent pressed={pressed} filtered={imeFiltered}: keycode={keyEvent.keycode} keySym={keySym} status={status} nbytes={nbytes}");
+			}
+
 			switch (status)
 			{
 				case XLib.XLookupBoth:
-					// Regular key press with text — handle as normal KeyDown with unicodeKey.
-					// Do NOT route through IME composition path to avoid double insertion.
+					// Keysym + text. For filtered events this means the IME forwarded
+					// a regular key (e.g., IBus passing through ASCII in English mode).
 					symbols = System.Text.Encoding.UTF8.GetString(buffer, nbytes);
 					if (string.IsNullOrEmpty(symbols))
 					{
@@ -94,7 +64,7 @@ internal class X11KeyboardInputSource : IUnoKeyboardInputSource
 					break;
 
 				case XLib.XLookupChars:
-					// IME committed text (no keysym) — route through composition events.
+					// Text only (no keysym) — IME committed text.
 					var committed = System.Text.Encoding.UTF8.GetString(buffer, nbytes);
 					if (!string.IsNullOrEmpty(committed))
 					{
@@ -105,18 +75,30 @@ internal class X11KeyboardInputSource : IUnoKeyboardInputSource
 					break;
 
 				case XLib.XLookupKeySym:
-					// Key only, no text — process as normal key event
+					// Key only, no text. If filtered, the IME consumed the key for
+					// composition — don't raise a KeyDown that would confuse the TextBox.
+					if (imeFiltered)
+					{
+						var ime = X11ImeTextBoxExtension.Instance;
+						X11XamlRootHost.QueueAction(_host, () => ime.OnComposing());
+						return;
+					}
 					break;
 
 				case XLib.XLookupNone:
-					// IME consumed the event entirely — skip
+					// No result — IME fully consumed the event. If filtered, signal composing.
+					if (imeFiltered)
+					{
+						var ime = X11ImeTextBoxExtension.Instance;
+						X11XamlRootHost.QueueAction(_host, () => ime.OnComposing());
+					}
 					return;
 			}
-
-			if (this.Log().IsEnabled(LogLevel.Trace))
-			{
-				this.Log().Trace($"ProcessKeyboardEvent pressed={pressed}: {keyEvent.keycode} -> {X11KeyTransform.VirtualKeyFromKeySym(keySym)} status={status} utf8:{symbols}");
-			}
+		}
+		else if (imeFiltered)
+		{
+			// Filtered event but no XIC — nothing to do
+			return;
 		}
 		else
 		{
