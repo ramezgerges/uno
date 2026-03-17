@@ -56,6 +56,13 @@ internal class X11KeyboardInputSource : IUnoKeyboardInputSource
 				case XLib.XLookupBoth:
 					// Keysym + text. For filtered events this means the IME forwarded
 					// a regular key (e.g., IBus passing through ASCII in English mode).
+					// Don't set symbols here — the non-filtered forwarded event will
+					// handle normal character insertion via the KeyDown path.
+					if (imeFiltered)
+					{
+						// Skip entirely — the non-filtered forwarded event handles KeyDown.
+						return;
+					}
 					symbols = System.Text.Encoding.UTF8.GetString(buffer, nbytes);
 					if (string.IsNullOrEmpty(symbols))
 					{
@@ -72,7 +79,7 @@ internal class X11KeyboardInputSource : IUnoKeyboardInputSource
 						X11XamlRootHost.QueueAction(_host, () => imeExtension.OnCommittedText(committed));
 					}
 					// Don't set symbols — text is handled by composition events, not KeyDown.
-					break;
+					return;
 
 				case XLib.XLookupKeySym:
 					// Key only, no text. If filtered, the IME consumed the key for
