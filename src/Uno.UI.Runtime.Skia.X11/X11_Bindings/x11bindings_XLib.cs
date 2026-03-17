@@ -266,8 +266,16 @@ namespace Uno.WinUI.Runtime.Skia.X11
 		[LibraryImport(libX11)]
 		public static partial int XCloseIM(IntPtr im);
 
-		[DllImport(libX11)]
-		public static extern IntPtr XCreateIC(IntPtr im, __arglist);
+		// XCreateIC is vararg in C, but __arglist is not supported on Linux .NET.
+		// We define a fixed-signature overload for the specific parameter combination we use.
+		// On x86_64 System V ABI, this is safe for integer/pointer-only arguments.
+		[DllImport(libX11, EntryPoint = "XCreateIC")]
+		public static extern IntPtr XCreateIC(
+			IntPtr im,
+			string inputStyle, IntPtr inputStyleValue,
+			string clientWindow, IntPtr clientWindowValue,
+			string focusWindow, IntPtr focusWindowValue,
+			IntPtr terminator);
 
 		[LibraryImport(libX11)]
 		public static partial void XDestroyIC(IntPtr ic);
@@ -285,8 +293,13 @@ namespace Uno.WinUI.Runtime.Skia.X11
 		[LibraryImport(libX11)]
 		public static partial int Xutf8LookupString(IntPtr ic, ref XKeyEvent xevent, byte* buffer, int bytes_buffer, out nint keysym, out int status);
 
-		[DllImport(libX11)]
-		public static extern IntPtr XSetICValues(IntPtr ic, __arglist);
+		// XSetICValues is vararg in C, but __arglist is not supported on Linux .NET.
+		// Fixed-signature overload for setting XNSpotLocation (XPoint*).
+		[DllImport(libX11, EntryPoint = "XSetICValues")]
+		public static extern IntPtr XSetICValues(
+			IntPtr ic,
+			string attrName, ref XPoint attrValue,
+			IntPtr terminator);
 
 		// XIM constants
 		public const string XNInputStyle = "inputStyle";

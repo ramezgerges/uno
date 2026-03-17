@@ -90,11 +90,10 @@ internal sealed class X11ImeTextBoxExtension : IImeTextBoxExtension
 			if (!_windowToXic.TryGetValue(_currentWindow, out _currentXic))
 			{
 				_currentXic = XLib.XCreateIC(_xim,
-					__arglist(
-						XLib.XNInputStyle, (IntPtr)(XLib.XIMPreeditNothing | XLib.XIMStatusNothing),
-						XLib.XNClientWindow, _currentWindow,
-						XLib.XNFocusWindow, _currentWindow,
-						IntPtr.Zero));
+					XLib.XNInputStyle, (IntPtr)(XLib.XIMPreeditNothing | XLib.XIMStatusNothing),
+					XLib.XNClientWindow, _currentWindow,
+					XLib.XNFocusWindow, _currentWindow,
+					IntPtr.Zero);
 
 				if (_currentXic == IntPtr.Zero)
 				{
@@ -176,6 +175,6 @@ internal sealed class X11ImeTextBoxExtension : IImeTextBoxExtension
 		var point = new XPoint { X = x, Y = y };
 		using var _ = X11Helper.XLock(_currentDisplay);
 		XLib.XSetICValues(_currentXic,
-			__arglist(XLib.XNSpotLocation, point, IntPtr.Zero));
+			XLib.XNSpotLocation, ref point, IntPtr.Zero);
 	}
 }
