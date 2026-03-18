@@ -10,10 +10,12 @@ NS_ASSUME_NONNULL_BEGIN
 
 @import AppKit;
 
-@interface UNOSoftView : NSView
+@interface UNOSoftView : NSView <NSTextInputClient>
 
 - (void)drawRect:(NSRect)dirtyRect;
 - (void)setFrameSize:(NSSize)newSize;
+
+@property (nonatomic) BOOL imeActive;
 
 @end
 
