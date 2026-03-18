@@ -313,6 +313,9 @@ namespace Uno.WinUI.Runtime.Skia.X11
 		[LibraryImport(libX11)]
 		public static partial int Xutf8LookupString(IntPtr ic, ref XKeyEvent xevent, byte* buffer, int bytes_buffer, out nint keysym, out int status);
 
+		[LibraryImport(libX11)]
+		public static partial int XmbLookupString(IntPtr ic, ref XKeyEvent xevent, byte* buffer, int bytes_buffer, out nint keysym, out int status);
+
 		// XSetICValues is vararg in C, but __arglist is not supported on Linux .NET.
 		// Fixed-signature overload for setting a preedit attribute (nested list).
 		[DllImport(libX11, EntryPoint = "XSetICValues")]
