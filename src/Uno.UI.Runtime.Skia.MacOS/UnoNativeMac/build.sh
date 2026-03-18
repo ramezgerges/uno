@@ -9,4 +9,6 @@ chmod +x getSkiaSharpDylib.sh
 cd ..
 xcodebuild $@
 mkdir -p ../runtimes/osx/native
-cp -R build/Release/libUnoNativeMac.* ../runtimes/osx/native || true
+# Copy from whichever configuration was built (Release or Debug)
+cp -R build/Release/libUnoNativeMac.* ../runtimes/osx/native 2>/dev/null || \
+cp -R build/Debug/libUnoNativeMac.* ../runtimes/osx/native 2>/dev/null || true
