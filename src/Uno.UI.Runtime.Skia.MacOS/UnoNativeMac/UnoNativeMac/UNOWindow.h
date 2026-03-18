@@ -370,6 +370,7 @@ ime_get_caret_rect_callback_fn_ptr uno_get_ime_get_caret_rect_callback(void);
 @property CAShapeLayer *clipLayer;
 
 @property (nonatomic) BOOL imeActive;
+@property (nonatomic, readonly) BOOL keyEventHandledByIME;
 
 @end
 

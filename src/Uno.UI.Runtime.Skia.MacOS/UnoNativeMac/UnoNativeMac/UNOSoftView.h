@@ -16,6 +16,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)setFrameSize:(NSSize)newSize;
 
 @property (nonatomic) BOOL imeActive;
+@property (nonatomic, readonly) BOOL keyEventHandledByIME;
 
 @end
 

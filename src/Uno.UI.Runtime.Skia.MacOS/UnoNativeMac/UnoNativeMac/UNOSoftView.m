@@ -11,6 +11,7 @@
     NSRange _markedRange;
     NSRange _selectedRange;
     NSTextInputContext *_imeInputContext;
+    BOOL _keyEventHandledByIME;
 }
 
 - (instancetype)initWithFrame:(NSRect)frameRect {
@@ -100,19 +101,20 @@
     return [super inputContext];
 }
 
-// When IME is active, route key events through the text input system
+// When IME is active, route key events through the text input system.
+// _keyEventHandledByIME tracks whether insertText:/setMarkedText: was called.
 - (void)keyDown:(NSEvent *)event {
     if (_imeActive) {
+        _keyEventHandledByIME = NO;
         NSTextInputContext *ctx = self.inputContext;
         if (ctx) {
-            if (![ctx handleEvent:event]) {
-                [self interpretKeyEvents:@[event]];
-            }
+            [ctx handleEvent:event];
         } else {
             [self interpretKeyEvents:@[event]];
         }
 #if DEBUG
-        NSLog(@"UNOSoftView keyDown: inputContext=%p event=%@", ctx, event);
+        NSLog(@"UNOSoftView keyDown: inputContext=%p handledByIME=%s event=%@",
+              ctx, _keyEventHandledByIME ? "YES" : "NO", event);
 #endif
     }
     // If not IME active, UNOWindow.sendEvent: handles the key event directly
@@ -121,6 +123,8 @@
 #pragma mark - NSTextInputClient
 
 - (void)insertText:(id)string replacementRange:(NSRange)replacementRange {
+    _keyEventHandledByIME = YES;
+
     NSString *text;
     if ([string isKindOfClass:[NSAttributedString class]]) {
         text = [(NSAttributedString *)string string];
@@ -146,6 +150,8 @@
 }
 
 - (void)setMarkedText:(id)string selectedRange:(NSRange)selectedRange replacementRange:(NSRange)replacementRange {
+    _keyEventHandledByIME = YES;
+
     NSString *text;
     if ([string isKindOfClass:[NSAttributedString class]]) {
         text = [(NSAttributedString *)string string];

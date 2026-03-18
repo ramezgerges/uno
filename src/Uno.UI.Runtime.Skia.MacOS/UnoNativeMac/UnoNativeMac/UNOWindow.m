@@ -93,6 +93,7 @@ NSWindow* uno_app_get_main_window(void)
     NSRange _markedRange;
     NSRange _selectedRange;
     NSTextInputContext *_imeInputContext;
+    BOOL _keyEventHandledByIME;
 }
 
 // behave like UIView/UWP/WinUI, where the origin is top/left, instead of bottom/left
@@ -128,22 +129,23 @@ NSWindow* uno_app_get_main_window(void)
     return [super inputContext];
 }
 
-// When IME is active, route key events through the text input system
+// When IME is active, route key events through the text input system.
+// _keyEventHandledByIME is set to YES by insertText:/setMarkedText: if the
+// input method consumed the event. If NO after handleEvent:, the event was a
+// non-composition key (arrow, backspace, tab, etc.) and sendEvent: should
+// fall through to normal key handling.
 - (void)keyDown:(NSEvent *)event {
     if (_imeActive) {
+        _keyEventHandledByIME = NO;
         NSTextInputContext *ctx = self.inputContext;
         if (ctx) {
-            // handleEvent: is the preferred way to send events to the input method.
-            // It returns YES if the input method handled the event.
-            if (![ctx handleEvent:event]) {
-                // If the input method did not handle it, fall through to interpretKeyEvents:
-                [self interpretKeyEvents:@[event]];
-            }
+            [ctx handleEvent:event];
         } else {
             [self interpretKeyEvents:@[event]];
         }
 #if DEBUG
-        NSLog(@"UNOMetalFlippedView keyDown: inputContext=%p event=%@", ctx, event);
+        NSLog(@"UNOMetalFlippedView keyDown: inputContext=%p handledByIME=%s event=%@",
+              ctx, _keyEventHandledByIME ? "YES" : "NO", event);
 #endif
     }
     // If not IME active, UNOWindow.sendEvent: handles the key event directly
@@ -152,6 +154,8 @@ NSWindow* uno_app_get_main_window(void)
 #pragma mark - NSTextInputClient
 
 - (void)insertText:(id)string replacementRange:(NSRange)replacementRange {
+    _keyEventHandledByIME = YES;
+
     NSString *text;
     if ([string isKindOfClass:[NSAttributedString class]]) {
         text = [(NSAttributedString *)string string];
@@ -177,6 +181,8 @@ NSWindow* uno_app_get_main_window(void)
 }
 
 - (void)setMarkedText:(id)string selectedRange:(NSRange)selectedRange replacementRange:(NSRange)replacementRange {
+    _keyEventHandledByIME = YES;
+
     NSString *text;
     if ([string isKindOfClass:[NSAttributedString class]]) {
         text = [(NSAttributedString *)string string];
@@ -1128,14 +1134,26 @@ NSOperatingSystemVersion _osVersion;
         case NSEventTypeKeyDown: {
             // When IME is active, route key events through the content view's
             // text input system (NSTextInputClient) for composition support.
-            // The content view's keyDown: calls interpretKeyEvents: which triggers
+            // The content view's keyDown: calls handleEvent: which triggers
             // the NSTextInputClient protocol callbacks (setMarkedText/insertText).
+            // If the IME didn't consume the event (arrow keys, backspace, tab, etc.),
+            // fall through to normal key handling.
             NSView *contentView = self.contentViewController.view;
             BOOL imeActive = [contentView respondsToSelector:@selector(imeActive)] && [(id)contentView imeActive];
             if (imeActive) {
                 [self makeFirstResponder:contentView];
                 [contentView keyDown:event];
-                handled = true;
+                BOOL consumed = [contentView respondsToSelector:@selector(keyEventHandledByIME)]
+                    && [(id)contentView keyEventHandledByIME];
+                if (consumed) {
+                    handled = true;
+                } else {
+                    // IME didn't handle this key (arrow, backspace, tab, etc.)
+                    // Fall through to normal key processing
+                    unsigned short scanCode = event.keyCode;
+                    UniChar unicode = get_unicode(event);
+                    handled = uno_get_window_key_down_callback()(self, get_virtual_key(scanCode), get_modifiers(event.modifierFlags), scanCode, unicode);
+                }
             } else {
                 unsigned short scanCode = event.keyCode;
                 UniChar unicode = get_unicode(event);
