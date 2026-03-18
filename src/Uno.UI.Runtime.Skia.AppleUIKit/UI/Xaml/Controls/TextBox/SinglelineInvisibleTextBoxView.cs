@@ -212,5 +212,21 @@ internal partial class SinglelineInvisibleTextBoxView : UITextField, IInvisibleT
 		base.UnmarkText();
 	}
 
+	public override CoreGraphics.CGRect GetFirstRectForRange(UITextRange range)
+	{
+		var caretRect = AppleUIKitImeTextBoxExtension.Instance.GetCaretRect();
+		if (caretRect != Windows.Foundation.Rect.Empty && Superview is not null)
+		{
+			// GetCaretRect returns Uno logical coordinates (relative to the XamlRoot).
+			// iOS expects the result in the view's own coordinate system, then uses the
+			// view hierarchy to convert to screen coordinates for the candidate window.
+			// Since our view is off-screen, convert from the superview's (window) coordinate
+			// space into our local coordinate space.
+			var windowRect = new CoreGraphics.CGRect(caretRect.X, caretRect.Y, caretRect.Width, caretRect.Height);
+			return ConvertRectFromView(windowRect, Superview);
+		}
+		return base.GetFirstRectForRange(range);
+	}
+
 	#endregion
 }

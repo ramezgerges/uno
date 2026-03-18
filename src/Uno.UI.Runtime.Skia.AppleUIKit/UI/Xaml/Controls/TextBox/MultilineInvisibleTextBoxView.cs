@@ -174,5 +174,16 @@ internal partial class MultilineInvisibleTextBoxView : UITextView, IInvisibleTex
 		base.UnmarkText();
 	}
 
+	public override CoreGraphics.CGRect GetFirstRectForRange(UITextRange range)
+	{
+		var caretRect = AppleUIKitImeTextBoxExtension.Instance.GetCaretRect();
+		if (caretRect != Windows.Foundation.Rect.Empty && Superview is not null)
+		{
+			var windowRect = new CoreGraphics.CGRect(caretRect.X, caretRect.Y, caretRect.Width, caretRect.Height);
+			return ConvertRectFromView(windowRect, Superview);
+		}
+		return base.GetFirstRectForRange(range);
+	}
+
 	#endregion
 }
