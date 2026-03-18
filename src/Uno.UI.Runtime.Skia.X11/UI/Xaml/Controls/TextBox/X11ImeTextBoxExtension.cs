@@ -12,9 +12,9 @@ using Uno.UI.Xaml.Controls.Extensions;
 namespace Uno.WinUI.Runtime.Skia.X11;
 
 /// <summary>
-/// X11 XIM-based implementation of <see cref="IImeTextBoxExtension"/>.
-/// Uses XOpenIM/XCreateIC with XIMPreeditNothing to create input contexts
-/// per window, and routes composition events from the keyboard input source.
+/// X11 IME implementation of <see cref="IImeTextBoxExtension"/>.
+/// When a D-Bus IME (IBus/Fcitx) is active, delegates cursor and focus management to it.
+/// Falls back to XIM (XOpenIM/XCreateIC) when no D-Bus IME is available.
 /// </summary>
 internal sealed class X11ImeTextBoxExtension : IImeTextBoxExtension
 {
@@ -26,8 +26,7 @@ internal sealed class X11ImeTextBoxExtension : IImeTextBoxExtension
 	// The host for dispatching UI-thread actions.
 	private X11XamlRootHost? _currentHost;
 
-	// Pending spot location to be applied from the event thread.
-	// XSetICValues must not be called from the UI thread while the event thread uses the XIC.
+	// Pending spot location to be applied from the event thread (XIM only).
 	private volatile bool _spotLocationPending;
 	private short _pendingSpotX;
 	private short _pendingSpotY;
@@ -36,6 +35,9 @@ internal sealed class X11ImeTextBoxExtension : IImeTextBoxExtension
 	private IntPtr _currentWindow;
 	private IntPtr _currentXic;
 	private bool _isComposing;
+
+	// D-Bus IME reference (set during StartImeSession)
+	private IX11InputMethod? _dbusIme;
 
 	private X11ImeTextBoxExtension()
 	{
@@ -66,6 +68,7 @@ internal sealed class X11ImeTextBoxExtension : IImeTextBoxExtension
 		_currentWindow = IntPtr.Zero;
 		_currentXic = IntPtr.Zero;
 		_currentHost = null;
+		_dbusIme = null;
 
 		if (textBox.XamlRoot is not { } xamlRoot)
 		{
@@ -82,9 +85,25 @@ internal sealed class X11ImeTextBoxExtension : IImeTextBoxExtension
 		_currentDisplay = rootWindow.Display;
 		_currentWindow = rootWindow.Window;
 
+		// Check if D-Bus IME is active from the keyboard source
+		var keyboardSource = host.GetKeyboardSource();
+		_dbusIme = keyboardSource?.GetDBusIme();
+
+		if (_dbusIme?.IsEnabled == true)
+		{
+			// D-Bus IME is active — notify it of focus
+			_dbusIme.SetFocus(true);
+
+			if (this.Log().IsEnabled(LogLevel.Debug))
+			{
+				this.Log().Debug("IME session started with D-Bus IME backend.");
+			}
+			return;
+		}
+
+		// XIM fallback path
 		using (X11Helper.XLock(_currentDisplay))
 		{
-			// Open XIM if not already open
 			if (_xim == IntPtr.Zero)
 			{
 				_xim = XLib.XOpenIM(_currentDisplay, IntPtr.Zero, null!, null!);
@@ -98,13 +117,8 @@ internal sealed class X11ImeTextBoxExtension : IImeTextBoxExtension
 				}
 			}
 
-			// Get or create XIC for this window
 			if (!_windowToXic.TryGetValue(_currentWindow, out _currentXic))
 			{
-				// Use XIMPreeditNothing so the IME renders its own preedit popup.
-				// XIMPreeditCallbacks is not reliably supported by IBus — it accepts
-				// the style but never invokes the callbacks, causing XFilterEvent to
-				// swallow all key events (including backspace in English mode).
 				_currentXic = XLib.XCreateIC(_xim,
 					XLib.XNInputStyle, (IntPtr)(XLib.XIMPreeditNothing | XLib.XIMStatusNothing),
 					XLib.XNClientWindow, _currentWindow,
@@ -140,7 +154,12 @@ internal sealed class X11ImeTextBoxExtension : IImeTextBoxExtension
 			CompositionEnded?.Invoke(this, EventArgs.Empty);
 		}
 
-		if (_currentXic != IntPtr.Zero && _currentDisplay != IntPtr.Zero)
+		if (_dbusIme?.IsEnabled == true)
+		{
+			_dbusIme.SetFocus(false);
+			_dbusIme.Reset();
+		}
+		else if (_currentXic != IntPtr.Zero && _currentDisplay != IntPtr.Zero)
 		{
 			using (X11Helper.XLock(_currentDisplay))
 			{
@@ -148,6 +167,7 @@ internal sealed class X11ImeTextBoxExtension : IImeTextBoxExtension
 			}
 		}
 
+		_dbusIme = null;
 		_currentDisplay = IntPtr.Zero;
 		_currentWindow = IntPtr.Zero;
 		_currentXic = IntPtr.Zero;
@@ -185,12 +205,44 @@ internal sealed class X11ImeTextBoxExtension : IImeTextBoxExtension
 	}
 
 	/// <summary>
-	/// Stores the desired spot location. The actual XSetICValues call is deferred
-	/// to the event thread via <see cref="FlushPendingSpotLocation"/> to avoid
-	/// concurrent XIC access from the UI thread and the X11 event thread.
+	/// Called from the keyboard source when the D-Bus IME reports preedit text changes.
+	/// </summary>
+	internal void OnPreeditChanged(string? preeditText, int cursorPos)
+	{
+		if (!string.IsNullOrEmpty(preeditText))
+		{
+			if (!_isComposing)
+			{
+				_isComposing = true;
+				CompositionStarted?.Invoke(this, EventArgs.Empty);
+			}
+			CompositionUpdated?.Invoke(this, new ImeCompositionEventArgs(preeditText));
+		}
+		else
+		{
+			if (_isComposing)
+			{
+				_isComposing = false;
+				CompositionEnded?.Invoke(this, EventArgs.Empty);
+			}
+		}
+	}
+
+	/// <summary>
+	/// Stores the desired spot location. When D-Bus IME is active, updates the cursor
+	/// location directly. For XIM fallback, the actual XSetICValues call is deferred
+	/// to the event thread via <see cref="FlushPendingSpotLocation"/>.
 	/// </summary>
 	internal void UpdateSpotLocation(short x, short y)
 	{
+		if (_dbusIme?.IsEnabled == true)
+		{
+			// D-Bus IME: update cursor location directly (thread-safe D-Bus call)
+			_dbusIme.SetCursorLocation(x, y, 1, 20);
+			return;
+		}
+
+		// XIM fallback: defer to event thread
 		_pendingSpotX = x;
 		_pendingSpotY = y;
 		_spotLocationPending = true;

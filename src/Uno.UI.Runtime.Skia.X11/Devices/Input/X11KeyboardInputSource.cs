@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using Uno.Foundation.Logging;
 using Uno.UI.Hosting;
 using Windows.Foundation;
@@ -13,6 +14,12 @@ internal class X11KeyboardInputSource : IUnoKeyboardInputSource
 
 	private X11XamlRootHost _host;
 
+	// D-Bus IME backend (null if using XIM fallback)
+	private IX11InputMethod? _dbusIme;
+	private bool _dbusImeInitialized;
+
+	internal bool IsDBusImeActive => _dbusIme?.IsEnabled == true;
+
 	public X11KeyboardInputSource(IXamlRootHost host)
 	{
 		if (host is not X11XamlRootHost)
@@ -22,9 +29,172 @@ internal class X11KeyboardInputSource : IUnoKeyboardInputSource
 
 		_host = (X11XamlRootHost)host;
 		_host.SetKeyboardSource(this);
+
+		InitDBusIme();
+	}
+
+	private void InitDBusIme()
+	{
+		if (_dbusImeInitialized)
+		{
+			return;
+		}
+		_dbusImeInitialized = true;
+
+		_dbusIme = X11InputMethodDetector.DetectAndCreate();
+
+		if (_dbusIme is not null)
+		{
+			// Wire Commit signal to the IME TextBox extension
+			_dbusIme.Commit += OnDBusImeCommit;
+
+			// Wire ForwardKey signal back into key processing
+			_dbusIme.ForwardKey += OnDBusImeForwardKey;
+
+			// Wire PreeditChanged signal
+			_dbusIme.PreeditChanged += OnDBusImePreeditChanged;
+		}
+	}
+
+	internal IX11InputMethod? GetDBusIme() => _dbusIme;
+
+	private void OnDBusImeCommit(string text)
+	{
+		if (this.Log().IsEnabled(LogLevel.Trace))
+		{
+			this.Log().Trace($"D-Bus IME Commit: '{text}'");
+		}
+
+		var imeExtension = X11ImeTextBoxExtension.Instance;
+		X11XamlRootHost.QueueAction(_host, () => imeExtension.OnCommittedText(text));
+	}
+
+	private void OnDBusImeForwardKey(uint keyVal, uint keyCode, uint state)
+	{
+		if (this.Log().IsEnabled(LogLevel.Trace))
+		{
+			this.Log().Trace($"D-Bus IME ForwardKey: keyval=0x{keyVal:X} keycode={keyCode} state=0x{state:X}");
+		}
+
+		// IBus ReleaseMask is bit 30
+		bool isRelease = (state & (1u << 30)) != 0;
+		// Clear the release mask for virtual key mapping
+		var cleanState = state & ~(1u << 30);
+
+		var keySym = (nint)keyVal;
+		var vk = X11KeyTransform.VirtualKeyFromKeySym(keySym);
+		var modifiers = X11XamlRootHost.XModifierMaskToVirtualKeyModifiers((XModifierMask)cleanState);
+
+		var args = new KeyEventArgs(
+			"keyboard",
+			vk,
+			modifiers,
+			new CorePhysicalKeyStatus
+			{
+				ScanCode = keyCode,
+				RepeatCount = 1,
+			},
+			unicodeKey: null);
+
+		X11XamlRootHost.QueueAction(_host, () =>
+		{
+			if (!isRelease)
+			{
+				KeyDown?.Invoke(this, args);
+			}
+			else
+			{
+				KeyUp?.Invoke(this, args);
+			}
+		});
+	}
+
+	private void OnDBusImePreeditChanged(string? preeditText, int cursorPos)
+	{
+		if (this.Log().IsEnabled(LogLevel.Trace))
+		{
+			this.Log().Trace($"D-Bus IME PreeditChanged: text='{preeditText}' cursor={cursorPos}");
+		}
+
+		var imeExtension = X11ImeTextBoxExtension.Instance;
+		X11XamlRootHost.QueueAction(_host, () =>
+		{
+			if (string.IsNullOrEmpty(preeditText))
+			{
+				// Preedit cleared — end composition if composing
+				if (imeExtension.IsComposing)
+				{
+					imeExtension.OnPreeditChanged(null, 0);
+				}
+			}
+			else
+			{
+				imeExtension.OnPreeditChanged(preeditText, cursorPos);
+			}
+		});
 	}
 
 	internal unsafe void ProcessKeyboardEvent(XKeyEvent keyEvent, bool pressed)
+	{
+		// If D-Bus IME is active, route through it first
+		if (_dbusIme?.IsEnabled == true)
+		{
+			ProcessKeyboardEventDBus(keyEvent, pressed);
+			return;
+		}
+
+		// XIM fallback path
+		ProcessKeyboardEventXIM(keyEvent, pressed);
+	}
+
+	private unsafe void ProcessKeyboardEventDBus(XKeyEvent keyEvent, bool pressed)
+	{
+		// Get keysym for virtual key mapping (D-Bus needs raw X11 keysym)
+		var buffer = stackalloc byte[4];
+		int nbytes = XLib.XLookupString(ref keyEvent, buffer, 4, out nint keySym, IntPtr.Zero);
+		var text = nbytes > 0 ? System.Text.Encoding.UTF8.GetString(buffer, nbytes) : null;
+
+		// Forward to D-Bus IME
+		uint keyVal = (uint)(ulong)keySym;
+		uint keyCode = (uint)keyEvent.keycode;
+		uint state = (uint)keyEvent.state;
+
+		bool handled;
+		try
+		{
+			handled = _dbusIme!.HandleKeyEventAsync(keyVal, keyCode, state, !pressed).GetAwaiter().GetResult();
+		}
+		catch (Exception ex)
+		{
+			if (this.Log().IsEnabled(LogLevel.Error))
+			{
+				this.Log().Error($"D-Bus IME HandleKeyEvent failed: {ex.Message}", ex);
+			}
+			handled = false;
+		}
+
+		if (this.Log().IsEnabled(LogLevel.Trace))
+		{
+			this.Log().Trace($"D-Bus IME key: keyval=0x{keyVal:X} keycode={keyCode} state=0x{state:X} pressed={pressed} → handled={handled}");
+		}
+
+		if (handled)
+		{
+			// IME consumed the event — do not dispatch KeyDown/KeyUp
+			return;
+		}
+
+		// IME did not handle — dispatch as normal key event
+		string? symbols = null;
+		if (!string.IsNullOrEmpty(text) && (text == "\r" || !char.IsControl(text[0])))
+		{
+			symbols = text;
+		}
+
+		DispatchKeyEvent(keyEvent, pressed, keySym, symbols);
+	}
+
+	private unsafe void ProcessKeyboardEventXIM(XKeyEvent keyEvent, bool pressed)
 	{
 		// Apply any pending spot location update from the UI thread.
 		// This must happen on the event thread to avoid concurrent XIC access.
@@ -37,11 +207,6 @@ internal class X11KeyboardInputSource : IUnoKeyboardInputSource
 
 		if (xic != IntPtr.Zero && pressed)
 		{
-			// Use Xutf8LookupString for IME-aware text lookup.
-			// This is only called for non-filtered events (filtered events are
-			// handled in the event loop by signaling OnComposing).
-			// When the IME commits, it synthesizes a non-filtered KeyPress that
-			// Xutf8LookupString returns XLookupChars for.
 			var buffer = stackalloc byte[64];
 			int nbytes = XLib.Xutf8LookupString(xic, ref keyEvent, buffer, 64, out keySym, out var status);
 
@@ -56,13 +221,12 @@ internal class X11KeyboardInputSource : IUnoKeyboardInputSource
 
 			if (this.Log().IsEnabled(LogLevel.Trace))
 			{
-				this.Log().Trace($"ProcessKeyboardEvent pressed={pressed}: keycode={keyEvent.keycode} keySym={keySym} status={status} nbytes={nbytes} text='{lookupText}'");
+				this.Log().Trace($"XIM ProcessKeyboardEvent pressed={pressed}: keycode={keyEvent.keycode} keySym={keySym} status={status} nbytes={nbytes} text='{lookupText}' window=0x{keyEvent.window:X} xic=0x{xic:X}");
 			}
 
 			switch (status)
 			{
 				case XLib.XLookupBoth:
-					// Keysym + text — regular key forwarded by IME (e.g., ASCII in English mode).
 					if (!string.IsNullOrEmpty(lookupText))
 					{
 						symbols = lookupText;
@@ -70,37 +234,33 @@ internal class X11KeyboardInputSource : IUnoKeyboardInputSource
 					break;
 
 				case XLib.XLookupChars:
-					// Text only (no keysym) — IME committed text.
 					if (!string.IsNullOrEmpty(lookupText) && !char.IsControl(lookupText[0]))
 					{
-						var imeExtension = X11ImeTextBoxExtension.Instance;
-						X11XamlRootHost.QueueAction(_host, () => imeExtension.OnCommittedText(lookupText));
+						if (X11ImeTextBoxExtension.Instance.IsComposing)
+						{
+							var imeExtension = X11ImeTextBoxExtension.Instance;
+							X11XamlRootHost.QueueAction(_host, () => imeExtension.OnCommittedText(lookupText));
+							return;
+						}
+
+						symbols = lookupText;
+						XLib.XLookupString(ref keyEvent, null, 0, out keySym, IntPtr.Zero);
+					}
+					else
+					{
 						return;
 					}
-					// Control character or empty — ignore, let KeyDown handle it via keySym.
-					return;
+					break;
 
 				case XLib.XLookupKeySym:
-					// Keysym only. However, some IMEs (e.g., IBus) put committed text
-					// in the buffer even with this status. If we have text, treat it
-					// as a commit.
-					if (!string.IsNullOrEmpty(lookupText) && !char.IsControl(lookupText[0]))
-					{
-						var imeExtension = X11ImeTextBoxExtension.Instance;
-						X11XamlRootHost.QueueAction(_host, () => imeExtension.OnCommittedText(lookupText));
-						return;
-					}
-					// No text — proceed to KeyDown without unicode character.
 					break;
 
 				case XLib.XLookupNone:
-					// No result — nothing to dispatch.
 					return;
 			}
 		}
 		else
 		{
-			// No XIC or key release — use classic XLookupString
 			var buffer = stackalloc byte[4];
 			int nbytes = XLib.XLookupString(ref keyEvent, buffer, 4, out keySym, IntPtr.Zero);
 
@@ -108,7 +268,7 @@ internal class X11KeyboardInputSource : IUnoKeyboardInputSource
 
 			if (this.Log().IsEnabled(LogLevel.Trace))
 			{
-				this.Log().Trace($"ProcessKeyboardEvent pressed={pressed}: keycode={keyEvent.keycode} keySym={keySym} vk={X11KeyTransform.VirtualKeyFromKeySym(keySym)} text='{text}' nbytes={nbytes}");
+				this.Log().Trace($"XIM ProcessKeyboardEvent pressed={pressed}: keycode={keyEvent.keycode} keySym={keySym} vk={X11KeyTransform.VirtualKeyFromKeySym(keySym)} text='{text}' nbytes={nbytes}");
 			}
 			if (!string.IsNullOrEmpty(text) && (text == "\r" || !char.IsControl(text[0])))
 			{
@@ -122,6 +282,11 @@ internal class X11KeyboardInputSource : IUnoKeyboardInputSource
 			symbols = null;
 		}
 
+		DispatchKeyEvent(keyEvent, pressed, keySym, symbols);
+	}
+
+	private void DispatchKeyEvent(XKeyEvent keyEvent, bool pressed, nint keySym, string? symbols)
+	{
 		if (this.Log().IsEnabled(LogLevel.Trace))
 		{
 			this.Log().Trace($"Dispatching {(pressed ? "KeyDown" : "KeyUp")}: vk={X11KeyTransform.VirtualKeyFromKeySym(keySym)} unicodeKey={(symbols?.Length > 0 ? symbols[0].ToString() : "null")}");

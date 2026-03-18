@@ -65,6 +65,8 @@ internal partial class X11XamlRootHost
 		_keyboardSource = keyboardSource;
 	}
 
+	internal X11KeyboardInputSource? GetKeyboardSource() => _keyboardSource;
+
 	public void SetDragDropExtension(X11DragDropExtension dragDrop)
 	{
 		if (_dragDrop is not null)
@@ -146,25 +148,27 @@ internal partial class X11XamlRootHost
 
 			foreach (var @event in GetEvents(x11Window.Display))
 			{
-				// Let the IME process the event first via XFilterEvent.
-				// Filtered events are fully consumed by the IME — do NOT call
-				// Xutf8LookupString on them (it returns per-keystroke text, not
-				// commit text). Instead, just signal that composition is active.
-				// When the IME commits, it synthesizes a new non-filtered KeyPress
-				// that Xutf8LookupString will return XLookupChars for.
-				var filteredEvent = @event;
-				bool imeFiltered = XLib.XFilterEvent(ref filteredEvent, IntPtr.Zero);
-				if (imeFiltered)
+				// XFilterEvent is only needed for XIM fallback mode.
+				// When D-Bus IME is active, key events are routed directly through
+				// the D-Bus IME client, bypassing XIM entirely.
+				var useXimFilter = _keyboardSource is null || !_keyboardSource.IsDBusImeActive;
+				if (useXimFilter)
 				{
-					if (@event.type == XEventName.KeyPress)
+					var filteredEvent = @event;
+					bool imeFiltered = XLib.XFilterEvent(ref filteredEvent, IntPtr.Zero);
+					if (imeFiltered)
 					{
-						// Signal that the IME is composing (for TextBox state tracking)
-						X11XamlRootHost.QueueAction(this, () => X11ImeTextBoxExtension.Instance.OnComposing());
+						if (this.Log().IsEnabled(LogLevel.Trace))
+						{
+							this.Log().Trace($"XFilterEvent consumed {@event.type}: keycode={(@event.type == XEventName.KeyPress || @event.type == XEventName.KeyRelease ? @event.KeyEvent.keycode.ToString(System.Globalization.CultureInfo.InvariantCulture) : "N/A")}");
+						}
+						if (@event.type == XEventName.KeyPress)
+						{
+							X11XamlRootHost.QueueAction(this, () => X11ImeTextBoxExtension.Instance.OnComposing());
+						}
+						continue;
 					}
-					continue;
 				}
-
-				this.LogTrace()?.Trace($"XLIB EVENT: {@event.type}");
 
 				_ = XLib.XQueryTree(x11Window.Display, x11Window.Window, out IntPtr root, out _, out var children, out _);
 				_ = XLib.XFree(children);
