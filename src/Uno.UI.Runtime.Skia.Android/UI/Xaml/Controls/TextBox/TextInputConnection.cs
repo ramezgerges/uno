@@ -44,6 +44,13 @@ class TextInputConnection : BaseInputConnection
 
 	public delegate bool KeyboardEventHandler(KeyEvent? keyEvent);
 
+	/// <summary>
+	/// Callback invoked when the composing region changes.
+	/// Parameters: composingStart, composingEnd, composingText (nullable), fullText.
+	/// Used by <see cref="AndroidImeTextBoxExtension"/> to detect composition state transitions.
+	/// </summary>
+	internal Action<int, int, string?, string>? CompositionStateChanged { get; set; }
+
 	public TextInputConnection(View target, EditorInfo editorInfo, KeyboardEventHandler keyboardHandler) : base(target, true)
 	{
 		_target = target;
@@ -724,6 +731,19 @@ class TextInputConnection : BaseInputConnection
 		{
 			var info = GetCursorAnchorInfo();
 			_imm.UpdateCursorAnchorInfo(_target, info);
+		}
+
+		// Notify IME extension of composition state changes
+		if (composingRegionChanged || textChanged)
+		{
+			var composingStart = _editable.ComposingStart;
+			var composingEnd = _editable.ComposingEnd;
+			string? composingText = null;
+			if (composingStart >= 0 && composingEnd > composingStart && composingEnd <= _editable.Length())
+			{
+				composingText = _editable.SubSequence(composingStart, composingEnd)?.ToString();
+			}
+			CompositionStateChanged?.Invoke(composingStart, composingEnd, composingText, _editable.ToString());
 		}
 	}
 

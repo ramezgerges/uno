@@ -9,8 +9,8 @@
 	d:DesignWidth="400">
 
 	<StackPanel Spacing="8" Padding="16">
-		<TextBlock Text="X11 IME Debug" FontSize="20" FontWeight="Bold" />
-		<TextBlock Text="Type in the TextBox below to see IME event flow." FontSize="12" Opacity="0.7" />
+		<TextBlock Text="IME Composition Debug" FontSize="20" FontWeight="Bold" />
+		<TextBlock Text="Type in the TextBox below to see IME composition event flow (works on X11, Win32, Android)." FontSize="12" Opacity="0.7" />
 
 		<TextBox x:Name="InputTextBox" Header="Input TextBox" PlaceholderText="Type here to test IME..." />
 

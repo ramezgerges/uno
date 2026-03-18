@@ -6,7 +6,7 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace Uno.UI.Samples.Content.UITests.TextBoxControl
 {
-	[Sample("TextBox", Name = "TextBox_X11_IME_Debug", Description = "X11 IME Debug — shows D-Bus IME event flow")]
+	[Sample("TextBox", Name = "TextBox_IME_Debug", Description = "IME Debug — shows composition event flow on all Skia platforms")]
 	public sealed partial class TextBox_X11_IME_Debug : UserControl
 	{
 		private readonly StringBuilder _eventLog = new();
@@ -26,121 +26,77 @@ namespace Uno.UI.Samples.Content.UITests.TextBoxControl
 			InputTextBox.LostFocus += (_, _) => AddLog("TextBox LostFocus");
 			InputTextBox.TextChanged += OnTextChanged;
 
-#if HAS_UNO
-			// Try to hook into X11 IME events if on Linux/X11
-			TryHookImeEvents();
+#if __SKIA__
+			// Use the standard TextBox TextComposition events (available on all Skia platforms)
+			InputTextBox.TextCompositionStarted += (_, args) =>
+			{
+				StateText.Text = "Composing";
+				AddLog($"TextCompositionStarted: startIndex={args.StartIndex}, length={args.Length}");
+			};
+
+			InputTextBox.TextCompositionChanged += (_, args) =>
+			{
+				LastPreeditText.Text = GetCompositionSubstring(args.StartIndex, args.Length);
+				AddLog($"TextCompositionChanged: startIndex={args.StartIndex}, length={args.Length}, text='{LastPreeditText.Text}'");
+			};
+
+			InputTextBox.TextCompositionEnded += (_, args) =>
+			{
+				var committedText = GetCompositionSubstring(args.StartIndex, args.Length);
+				LastCommitText.Text = committedText.Length > 0 ? committedText : "(empty)";
+				StateText.Text = "Idle";
+				LastPreeditText.Text = "(cleared)";
+				AddLog($"TextCompositionEnded: startIndex={args.StartIndex}, length={args.Length}, committed='{committedText}'");
+			};
+
+			AddLog("TextComposition event hooks registered");
 #else
-			BackendText.Text = "N/A (not X11)";
+			BackendText.Text = "N/A (not Skia)";
 #endif
+		}
+
+		private string GetCompositionSubstring(int startIndex, int length)
+		{
+			var text = InputTextBox.Text;
+			if (startIndex >= 0 && length > 0 && startIndex + length <= text.Length)
+			{
+				return text.Substring(startIndex, length);
+			}
+			return "(out of range)";
 		}
 
 		private void DetectBackend()
 		{
-			if (!OperatingSystem.IsLinux())
+			if (OperatingSystem.IsLinux())
 			{
-				BackendText.Text = "N/A (not Linux)";
-				return;
+				var gtkImModule = Environment.GetEnvironmentVariable("GTK_IM_MODULE");
+				var unoImModule = Environment.GetEnvironmentVariable("UNO_IM_MODULE");
+				var xmodifiers = Environment.GetEnvironmentVariable("XMODIFIERS");
+
+				var detected = unoImModule ?? gtkImModule ?? "(from XMODIFIERS)";
+				BackendText.Text = $"X11 — {detected}";
+				AddLog($"Env: UNO_IM_MODULE={unoImModule}, GTK_IM_MODULE={gtkImModule}, XMODIFIERS={xmodifiers}");
 			}
-
-			var gtkImModule = Environment.GetEnvironmentVariable("GTK_IM_MODULE");
-			var unoImModule = Environment.GetEnvironmentVariable("UNO_IM_MODULE");
-			var xmodifiers = Environment.GetEnvironmentVariable("XMODIFIERS");
-
-			var detected = unoImModule ?? gtkImModule ?? "(from XMODIFIERS)";
-			BackendText.Text = $"{detected}";
-			AddLog($"Env: UNO_IM_MODULE={unoImModule}, GTK_IM_MODULE={gtkImModule}, XMODIFIERS={xmodifiers}");
-		}
-
-#if HAS_UNO
-		private void TryHookImeEvents()
-		{
-			try
+			else if (OperatingSystem.IsAndroid())
 			{
-				// Use reflection to access X11-specific IME types without compile-time dependency
-				var imeExtType = Type.GetType("Uno.WinUI.Runtime.Skia.X11.X11ImeTextBoxExtension, Uno.UI.Runtime.Skia.X11");
-				if (imeExtType is null)
-				{
-					AddLog("X11ImeTextBoxExtension not found (not X11 runtime)");
-					return;
-				}
-
-				var instanceProp = imeExtType.GetProperty("Instance",
-					System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
-				if (instanceProp is null)
-				{
-					AddLog("Instance property not found");
-					return;
-				}
-
-				var instance = instanceProp.GetValue(null);
-				if (instance is null)
-				{
-					AddLog("Instance is null");
-					return;
-				}
-
-				// Subscribe to CompositionStarted
-				var startedEvent = imeExtType.GetEvent("CompositionStarted");
-				startedEvent?.AddEventHandler(instance, new EventHandler((_, _) =>
-				{
-					DispatcherQueue.TryEnqueue(() =>
-					{
-						StateText.Text = "Composing";
-						AddLog("CompositionStarted");
-					});
-				}));
-
-				// Subscribe to CompositionCompleted
-				var completedEvent = imeExtType.GetEvent("CompositionCompleted");
-				if (completedEvent is not null)
-				{
-					// ImeCompositionEventArgs handler
-					var handler = new EventHandler<Uno.UI.Xaml.Controls.Extensions.ImeCompositionEventArgs>((_, args) =>
-					{
-						DispatcherQueue.TryEnqueue(() =>
-						{
-							LastCommitText.Text = args.Text ?? "(empty)";
-							AddLog($"CommitText: '{args.Text}'");
-						});
-					});
-					completedEvent.AddEventHandler(instance, handler);
-				}
-
-				// Subscribe to CompositionUpdated
-				var updatedEvent = imeExtType.GetEvent("CompositionUpdated");
-				if (updatedEvent is not null)
-				{
-					var handler = new EventHandler<Uno.UI.Xaml.Controls.Extensions.ImeCompositionEventArgs>((_, args) =>
-					{
-						DispatcherQueue.TryEnqueue(() =>
-						{
-							LastPreeditText.Text = args.Text ?? "(cleared)";
-							AddLog($"Preedit: '{args.Text}'");
-						});
-					});
-					updatedEvent.AddEventHandler(instance, handler);
-				}
-
-				// Subscribe to CompositionEnded
-				var endedEvent = imeExtType.GetEvent("CompositionEnded");
-				endedEvent?.AddEventHandler(instance, new EventHandler((_, _) =>
-				{
-					DispatcherQueue.TryEnqueue(() =>
-					{
-						StateText.Text = "Idle";
-						LastPreeditText.Text = "(cleared)";
-						AddLog("CompositionEnded");
-					});
-				}));
-
-				AddLog("IME event hooks registered");
+				BackendText.Text = "Android BaseInputConnection";
+				AddLog("Platform: Android Skia — IME via TextInputConnection");
 			}
-			catch (Exception ex)
+			else if (OperatingSystem.IsWindows())
 			{
-				AddLog($"Hook error: {ex.Message}");
+				BackendText.Text = "Win32 IMM32/TSF";
+				AddLog("Platform: Win32 — IME via IMM32");
+			}
+			else if (OperatingSystem.IsMacOS())
+			{
+				BackendText.Text = "macOS (no IME extension)";
+				AddLog("Platform: macOS — IME not yet implemented");
+			}
+			else
+			{
+				BackendText.Text = "Unknown platform";
 			}
 		}
-#endif
 
 		private void OnTextChanged(object sender, TextChangedEventArgs e)
 		{
