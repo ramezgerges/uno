@@ -150,23 +150,15 @@ internal partial class MultilineInvisibleTextBoxView : UITextView, IInvisibleTex
 
 	#region IME Composition (UITextInput overrides)
 
-	[Export("setMarkedText:selectedRange:")]
-	public void SetMarkedText(string markedText, NSRange selectedRange)
+	public override void SetMarkedText(string markedText, NSRange selectedRange)
 	{
 		AppleUIKitImeTextBoxExtension.Instance.OnSetMarkedText(markedText ?? string.Empty);
-
-		ObjCRuntime.Messaging.void_objc_msgSendSuper_IntPtr_NSRange(
-			SuperHandle,
-			ObjCRuntime.Selector.GetHandle("setMarkedText:selectedRange:"),
-			new NSString(markedText ?? string.Empty).Handle,
-			selectedRange);
+		base.SetMarkedText(markedText, selectedRange);
 	}
 
-	[Export("insertText:")]
 	public new void InsertText(string text)
 	{
 		var wasComposing = AppleUIKitImeTextBoxExtension.Instance.IsComposing;
-
 		base.InsertText(text);
 
 		if (wasComposing || !_settingTextFromManaged)
@@ -175,11 +167,10 @@ internal partial class MultilineInvisibleTextBoxView : UITextView, IInvisibleTex
 		}
 	}
 
-	[Export("unmarkText")]
-	public new void UnmarkText()
+	public override void UnmarkText()
 	{
 		AppleUIKitImeTextBoxExtension.Instance.OnUnmarkText();
-		ObjCRuntime.Messaging.void_objc_msgSendSuper(SuperHandle, ObjCRuntime.Selector.GetHandle("unmarkText"));
+		base.UnmarkText();
 	}
 
 	#endregion
