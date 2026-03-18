@@ -126,26 +126,26 @@ internal sealed class MacOSImeTextBoxExtension : IImeTextBoxExtension
 	/// </summary>
 	internal void OnInsertText(string text)
 	{
-		if (_isComposing)
+		bool wasComposing = _isComposing;
+
+		if (!wasComposing)
 		{
-			// Transition: Composing → Idle (commit)
-			_isComposing = false;
-			_lastComposingText = string.Empty;
-
-			CompositionCompleted?.Invoke(this, new ImeCompositionEventArgs(text));
-			CompositionEnded?.Invoke(this, EventArgs.Empty);
-
-			if (this.Log().IsEnabled(LogLevel.Trace))
-			{
-				this.Log().Trace($"Composition committed: '{text}'");
-			}
+			// Direct commit without prior composition (e.g., single-key IME commit,
+			// or typing a character that doesn't trigger composition like punctuation).
+			// Fire the full Started → Completed → Ended cycle so TextBox processes it.
+			CompositionStarted?.Invoke(this, EventArgs.Empty);
 		}
-		// If not composing, insertText is direct text input (e.g., typing 'a').
-		// This is handled by the existing key event path, so we don't fire
-		// composition events. However, when IME is active, the key event path
-		// is bypassed, so we need to handle direct insertion here too.
-		// The TextBox will receive the text via ProcessTextInput from the
-		// composition event handlers in TextBox.skia.cs.
+
+		_isComposing = false;
+		_lastComposingText = string.Empty;
+
+		CompositionCompleted?.Invoke(this, new ImeCompositionEventArgs(text));
+		CompositionEnded?.Invoke(this, EventArgs.Empty);
+
+		if (this.Log().IsEnabled(LogLevel.Trace))
+		{
+			this.Log().Trace($"Composition committed: '{text}' (wasComposing: {wasComposing})");
+		}
 	}
 
 	/// <summary>

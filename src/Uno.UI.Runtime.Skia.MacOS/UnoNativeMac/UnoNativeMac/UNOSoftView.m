@@ -10,6 +10,7 @@
     NSMutableAttributedString *_markedText;
     NSRange _markedRange;
     NSRange _selectedRange;
+    NSTextInputContext *_imeInputContext;
 }
 
 - (instancetype)initWithFrame:(NSRect)frameRect {
@@ -87,10 +88,32 @@
     return YES;
 }
 
+// Override inputContext to ensure we always have a valid NSTextInputContext
+// when IME is active, so the input method system can intercept key events.
+- (NSTextInputContext *)inputContext {
+    if (_imeActive) {
+        if (!_imeInputContext) {
+            _imeInputContext = [[NSTextInputContext alloc] initWithClient:self];
+        }
+        return _imeInputContext;
+    }
+    return [super inputContext];
+}
+
 // When IME is active, route key events through the text input system
 - (void)keyDown:(NSEvent *)event {
     if (_imeActive) {
-        [self interpretKeyEvents:@[event]];
+        NSTextInputContext *ctx = self.inputContext;
+        if (ctx) {
+            if (![ctx handleEvent:event]) {
+                [self interpretKeyEvents:@[event]];
+            }
+        } else {
+            [self interpretKeyEvents:@[event]];
+        }
+#if DEBUG
+        NSLog(@"UNOSoftView keyDown: inputContext=%p event=%@", ctx, event);
+#endif
     }
     // If not IME active, UNOWindow.sendEvent: handles the key event directly
 }

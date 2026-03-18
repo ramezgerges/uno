@@ -92,6 +92,7 @@ NSWindow* uno_app_get_main_window(void)
     NSMutableAttributedString *_markedText;
     NSRange _markedRange;
     NSRange _selectedRange;
+    NSTextInputContext *_imeInputContext;
 }
 
 // behave like UIView/UWP/WinUI, where the origin is top/left, instead of bottom/left
@@ -114,10 +115,36 @@ NSWindow* uno_app_get_main_window(void)
     return YES;
 }
 
+// Override inputContext to ensure we always have a valid NSTextInputContext
+// when IME is active. MTKView (a rendering view) may not provide one by default,
+// which would cause interpretKeyEvents: to bypass the input method entirely.
+- (NSTextInputContext *)inputContext {
+    if (_imeActive) {
+        if (!_imeInputContext) {
+            _imeInputContext = [[NSTextInputContext alloc] initWithClient:self];
+        }
+        return _imeInputContext;
+    }
+    return [super inputContext];
+}
+
 // When IME is active, route key events through the text input system
 - (void)keyDown:(NSEvent *)event {
     if (_imeActive) {
-        [self interpretKeyEvents:@[event]];
+        NSTextInputContext *ctx = self.inputContext;
+        if (ctx) {
+            // handleEvent: is the preferred way to send events to the input method.
+            // It returns YES if the input method handled the event.
+            if (![ctx handleEvent:event]) {
+                // If the input method did not handle it, fall through to interpretKeyEvents:
+                [self interpretKeyEvents:@[event]];
+            }
+        } else {
+            [self interpretKeyEvents:@[event]];
+        }
+#if DEBUG
+        NSLog(@"UNOMetalFlippedView keyDown: inputContext=%p event=%@", ctx, event);
+#endif
     }
     // If not IME active, UNOWindow.sendEvent: handles the key event directly
 }
@@ -849,8 +876,17 @@ void uno_set_ime_callbacks(ime_insert_text_callback_fn_ptr insertText,
 void uno_set_ime_active(UNOWindow* window, bool active)
 {
     NSView *contentView = window.contentViewController.view;
+#if DEBUG
+    NSLog(@"uno_set_ime_active: window=%p active=%s contentView=%@ respondsToSelector=%s",
+          window, active ? "true" : "false", contentView,
+          [contentView respondsToSelector:@selector(setImeActive:)] ? "true" : "false");
+#endif
     if ([contentView respondsToSelector:@selector(setImeActive:)]) {
         [(id)contentView setImeActive:active];
+        if (active) {
+            // Ensure the content view is the first responder when activating IME
+            [window makeFirstResponder:contentView];
+        }
     }
 }
 
