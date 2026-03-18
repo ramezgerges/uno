@@ -5,6 +5,7 @@ using ObjCRuntime;
 using UIKit;
 using Uno.Extensions;
 using Uno.UI.Extensions;
+using Uno.UI.Xaml.Controls.Extensions;
 
 namespace Uno.WinUI.Runtime.Skia.AppleUIKit.Controls;
 
@@ -63,6 +64,8 @@ internal partial class SinglelineInvisibleTextBoxView : UITextField, IInvisibleT
 			baseAction.Invoke();
 		}
 	}
+
+	public bool IsComposing => AppleUIKitImeTextBoxExtension.Instance.IsComposing;
 
 	internal InvisibleTextBoxViewExtension TextBoxViewExtension => _textBoxViewExtension.GetTarget();
 
@@ -182,4 +185,44 @@ internal partial class SinglelineInvisibleTextBoxView : UITextField, IInvisibleT
 			}
 		}
 	}
+
+	#region IME Composition (UITextInput overrides)
+
+	[Export("setMarkedText:selectedRange:")]
+	public void SetMarkedText(string markedText, NSRange selectedRange)
+	{
+		// Forward to extension before calling base so the composition state is tracked
+		AppleUIKitImeTextBoxExtension.Instance.OnSetMarkedText(markedText ?? string.Empty);
+
+		// Let the native UITextField handle its own marked text state
+		ObjCRuntime.Messaging.void_objc_msgSendSuper_IntPtr_NSRange(
+			SuperHandle,
+			ObjCRuntime.Selector.GetHandle("setMarkedText:selectedRange:"),
+			new NSString(markedText ?? string.Empty).Handle,
+			selectedRange);
+	}
+
+	[Export("insertText:")]
+	public new void InsertText(string text)
+	{
+		var wasComposing = AppleUIKitImeTextBoxExtension.Instance.IsComposing;
+
+		// Let the native UITextField handle the text insertion
+		base.InsertText(text);
+
+		// Forward to IME extension for composition event lifecycle
+		if (wasComposing || !_settingTextFromManaged)
+		{
+			AppleUIKitImeTextBoxExtension.Instance.OnInsertText(text);
+		}
+	}
+
+	[Export("unmarkText")]
+	public new void UnmarkText()
+	{
+		AppleUIKitImeTextBoxExtension.Instance.OnUnmarkText();
+		ObjCRuntime.Messaging.void_objc_msgSendSuper(SuperHandle, ObjCRuntime.Selector.GetHandle("unmarkText"));
+	}
+
+	#endregion
 }
