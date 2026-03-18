@@ -98,6 +98,10 @@ class TextInputConnection : BaseInputConnection
 				Selection.SetSelection(_editable, _activeTextBox.SelectionStart, _activeTextBox.SelectionStart + _activeTextBox.SelectionLength);
 
 				_activeTextBox.SelectionChanged += OnActiveTextBoxSelectionChanged;
+
+				// Proactively send cursor position so the IME candidate window
+				// is correctly positioned on the very first composition.
+				SendCursorAnchorInfo();
 			}
 		}
 	}
@@ -109,6 +113,20 @@ class TextInputConnection : BaseInputConnection
 			this.LogDebug()?.Debug($"OnActiveTextBoxTextChanged: {_activeTextBox.Text}");
 
 			UpdateEditableSelectionAndText();
+		}
+	}
+
+	/// <summary>
+	/// Sends the current cursor anchor info to the IME immediately.
+	/// Called when ActiveTextBox is set to ensure the candidate window
+	/// is positioned correctly before any editing occurs.
+	/// </summary>
+	internal void SendCursorAnchorInfo()
+	{
+		var info = GetCursorAnchorInfo();
+		if (info is not null)
+		{
+			_imm.UpdateCursorAnchorInfo(_target, info);
 		}
 	}
 
