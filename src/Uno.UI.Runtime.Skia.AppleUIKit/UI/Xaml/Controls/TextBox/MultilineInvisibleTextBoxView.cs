@@ -152,7 +152,8 @@ internal partial class MultilineInvisibleTextBoxView : UITextView, IInvisibleTex
 
 	public override void SetMarkedText(string markedText, NSRange selectedRange)
 	{
-		AppleUIKitImeTextBoxExtension.Instance.OnSetMarkedText(markedText ?? string.Empty);
+		markedText ??= string.Empty;
+		AppleUIKitImeTextBoxExtension.Instance.OnSetMarkedText(markedText);
 		base.SetMarkedText(markedText, selectedRange);
 	}
 
