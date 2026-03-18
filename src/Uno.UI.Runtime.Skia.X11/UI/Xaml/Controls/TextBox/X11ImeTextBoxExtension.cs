@@ -91,8 +91,9 @@ internal sealed class X11ImeTextBoxExtension : IImeTextBoxExtension
 
 		if (_dbusIme?.IsEnabled == true)
 		{
-			// D-Bus IME is active — notify it of focus
+			// D-Bus IME is active — notify it of focus and send initial cursor location
 			_dbusIme.SetFocus(true);
+			UpdateSpotLocationFromTextBox(textBox);
 
 			if (this.Log().IsEnabled(LogLevel.Debug))
 			{
@@ -226,6 +227,28 @@ internal sealed class X11ImeTextBoxExtension : IImeTextBoxExtension
 				CompositionEnded?.Invoke(this, EventArgs.Empty);
 			}
 		}
+	}
+
+	/// <summary>
+	/// Computes and sends the cursor location from the given TextBox to the D-Bus IME.
+	/// Called during <see cref="StartImeSession"/> to ensure the candidate window
+	/// is positioned correctly before the first keystroke.
+	/// </summary>
+	private void UpdateSpotLocationFromTextBox(TextBox textBox)
+	{
+		var textBoxView = textBox.TextBoxView;
+		if (textBoxView?.DisplayBlock?.ParsedText is null || textBox.XamlRoot is null)
+		{
+			return;
+		}
+
+		var index = textBox.IsBackwardSelection ? textBox.SelectionStart : textBox.SelectionStart + textBox.SelectionLength;
+		var rect = textBoxView.DisplayBlock.ParsedText.GetRectForIndex(index);
+		var transform = textBoxView.DisplayBlock.TransformToVisual(null);
+		var point = transform.TransformPoint(new Windows.Foundation.Point(rect.Left, rect.Top + rect.Height));
+		var scale = textBox.XamlRoot.RasterizationScale;
+
+		UpdateSpotLocation((short)(point.X * scale), (short)(point.Y * scale));
 	}
 
 	/// <summary>
