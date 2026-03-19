@@ -1,9 +1,11 @@
 #nullable enable
 
 using System;
+using Windows.System;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.Input.Ime;
+using Windows.Win32.UI.Input.KeyboardAndMouse;
 using Microsoft.UI.Xaml.Controls;
 using Uno.UI.Hosting;
 using Uno.UI.NativeElementHosting;
@@ -57,6 +59,40 @@ internal sealed class Win32ImeTextBoxExtension : IImeTextBoxExtension
 		}
 
 		_hwnd = HWND.Null;
+	}
+
+	/// <summary>
+	/// Called from WndProc when WM_KEYDOWN arrives with VK_PROCESSKEY during composition.
+	/// If the original key is Left or Right arrow, commits the composition so the arrow
+	/// key can move the TextBox cursor, matching WinUI behavior.
+	/// </summary>
+	/// <returns>The original VirtualKey if composition was committed, null otherwise.</returns>
+	internal VirtualKey? TryCommitCompositionForArrowKey(LPARAM lParam)
+	{
+		if (!_isComposing)
+		{
+			return null;
+		}
+
+		var scanCode = (uint)((lParam.Value & 0x00FF0000) >> 16);
+		var realKey = (VirtualKey)PInvoke.MapVirtualKey(scanCode, MAP_VIRTUAL_KEY_TYPE.MAPVK_VSC_TO_VK);
+
+		if (realKey is not (VirtualKey.Left or VirtualKey.Right))
+		{
+			return null;
+		}
+
+		// Commit the active composition. ImmNotifyIME sends WM_IME_COMPOSITION (GCS_RESULTSTR)
+		// and WM_IME_ENDCOMPOSITION synchronously, so composition state is fully resolved
+		// before this method returns.
+		var himc = PInvoke.ImmGetContext(_hwnd);
+		if (!himc.IsNull)
+		{
+			PInvoke.ImmNotifyIME(himc, NOTIFY_IME_ACTION.NI_COMPOSITIONSTR, NOTIFY_IME_INDEX.CPS_COMPLETE, 0);
+			PInvoke.ImmReleaseContext(_hwnd, himc);
+		}
+
+		return realKey;
 	}
 
 	/// <summary>
