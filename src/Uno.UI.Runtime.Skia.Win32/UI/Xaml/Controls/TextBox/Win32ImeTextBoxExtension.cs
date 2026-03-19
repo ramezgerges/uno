@@ -131,7 +131,7 @@ internal sealed class Win32ImeTextBoxExtension : IImeTextBoxExtension
 			if (flags.HasFlag(IME_COMPOSITION_STRING.GCS_COMPSTR))
 			{
 				var text = GetCompositionString(himc, IME_COMPOSITION_STRING.GCS_COMPSTR);
-				if (text is not null)
+				if (!string.IsNullOrEmpty(text))
 				{
 					CompositionUpdated?.Invoke(this, new ImeCompositionEventArgs(text));
 				}
