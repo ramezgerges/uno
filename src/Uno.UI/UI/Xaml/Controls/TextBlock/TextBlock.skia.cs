@@ -276,9 +276,9 @@ namespace Microsoft.UI.Xaml.Controls
 				}
 			}) : TextHighlighters;
 			(int startIndex, int length)? compositionRange = null;
-			if (OwningTextBox is { IsComposing: true, CompositionLength: > 0 } owningTextBox)
+			if (OwningTextBox is { IsComposing: true, CompositionUnderlineLength: > 0 } owningTextBox)
 			{
-				compositionRange = (owningTextBox.CompositionStartIndex, owningTextBox.CompositionLength);
+				compositionRange = (owningTextBox.CompositionUnderlineStart, owningTextBox.CompositionUnderlineLength);
 			}
 			ParsedText.Draw(
 				session,

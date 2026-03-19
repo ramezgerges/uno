@@ -13,6 +13,7 @@ public partial class TextBox
 	private bool _isComposing;
 	private int _compositionStartIndex;
 	private int _compositionLength;
+	private int _compositionCursorOffset;
 
 	public event TypedEventHandler<TextBox, TextCompositionStartedEventArgs> TextCompositionStarted;
 	public event TypedEventHandler<TextBox, TextCompositionChangedEventArgs> TextCompositionChanged;
@@ -21,6 +22,13 @@ public partial class TextBox
 	internal bool IsComposing => _isComposing;
 	internal int CompositionStartIndex => _compositionStartIndex;
 	internal int CompositionLength => _compositionLength;
+
+	/// <summary>
+	/// The underline range within the composition, starting after any already-resolved characters.
+	/// Used by the renderer to only underline the active (unresolved) portion of the preedit.
+	/// </summary>
+	internal int CompositionUnderlineStart => _compositionStartIndex + _compositionCursorOffset;
+	internal int CompositionUnderlineLength => _compositionLength - _compositionCursorOffset;
 
 	private void InitializeIme()
 	{
@@ -59,6 +67,7 @@ public partial class TextBox
 		_isComposing = true;
 		_compositionStartIndex = SelectionStart;
 		_compositionLength = 0;
+		_compositionCursorOffset = 0;
 
 		TextCompositionStarted?.Invoke(this, new TextCompositionStartedEventArgs(_compositionStartIndex, 0));
 	}
@@ -72,6 +81,7 @@ public partial class TextBox
 
 		ReplaceCompositionText(compositionText, cursorPosition);
 		_compositionLength = compositionText.Length;
+		_compositionCursorOffset = cursorPosition >= 0 ? cursorPosition : 0;
 
 		TextCompositionChanged?.Invoke(this, new TextCompositionChangedEventArgs(_compositionStartIndex, _compositionLength));
 		InvalidateTextBoxRender();
