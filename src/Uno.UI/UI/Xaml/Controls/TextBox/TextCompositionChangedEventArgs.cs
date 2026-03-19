@@ -2,7 +2,6 @@ namespace Microsoft.UI.Xaml.Controls;
 
 public partial class TextCompositionChangedEventArgs
 {
-#if __SKIA__
 	private readonly int _startIndex;
 	private readonly int _length;
 
@@ -15,5 +14,4 @@ public partial class TextCompositionChangedEventArgs
 	public int StartIndex => _startIndex;
 
 	public int Length => _length;
-#endif
 }
