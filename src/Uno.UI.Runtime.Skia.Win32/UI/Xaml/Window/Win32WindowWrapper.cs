@@ -24,7 +24,6 @@ using Windows.Devices.Input;
 using Windows.Foundation;
 using Windows.Graphics;
 using Windows.UI.Core;
-using Windows.System;
 using Windows.UI.ViewManagement;
 using Windows.Win32;
 using Windows.Win32.Foundation;
@@ -304,15 +303,6 @@ internal partial class Win32WindowWrapper : NativeWindowWrapperBase, IXamlRootHo
 				return new LRESULT(0);
 			case PInvoke.WM_KEYDOWN:
 				this.LogTrace()?.Trace($"WndProc received a {nameof(PInvoke.WM_KEYDOWN)} message.");
-				// During IME composition, arrow keys arrive as VK_PROCESSKEY (0xE5) because the
-				// IME framework consumes them. For Left/Right, commit the composition and dispatch
-				// the real arrow key so it moves the TextBox cursor, matching WinUI behavior.
-				if ((VirtualKey)wParam.Value == VirtualKeyHelper.ProcessKey
-					&& Win32ImeTextBoxExtension.Instance.TryCommitCompositionForArrowKey(lParam) is { } realKey)
-				{
-					OnKey(new WPARAM((nuint)realKey), lParam, true);
-					return new LRESULT(0);
-				}
 				OnKey(wParam, lParam, true);
 				break;
 			case PInvoke.WM_KEYUP:

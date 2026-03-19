@@ -228,7 +228,6 @@ InvalidateRect
 LoadCursor
 LoadRegTypeLib
 LocalFree
-MapVirtualKey
 MapWindowPoints
 MonitorFromWindow
 MonitorFromPoint
