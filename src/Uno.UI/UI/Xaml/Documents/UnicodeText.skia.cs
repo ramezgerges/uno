@@ -940,7 +940,7 @@ internal readonly partial struct UnicodeText : IParsedText
 					var underlineY = y + line.baselineOffset + yOffset;
 					var underlineLeftX = unalignedX + alignmentOffset;
 					var underlineRightX = underlineLeftX + cluster.Value.width;
-					var foreColor = BrushToColor(highlighter.Value.foreground, session.Opacity);
+					var foreColor = BrushToColor(_runBreaks[runBreakIndex].foreground, session.Opacity);
 					compositionUnderlines.Add((underlineLeftX, underlineRightX, underlineY, foreColor));
 				}
 			}
