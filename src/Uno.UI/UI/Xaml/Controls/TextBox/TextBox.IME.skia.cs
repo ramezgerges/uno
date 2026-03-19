@@ -65,7 +65,7 @@ public partial class TextBox
 
 	private void OnImeCompositionUpdated(string compositionText)
 	{
-		if (!_isComposing || IsReadOnly)
+		if (IsReadOnly)
 		{
 			return;
 		}
@@ -79,7 +79,7 @@ public partial class TextBox
 
 	private void OnImeCompositionCompleted(string committedText)
 	{
-		if (!_isComposing || IsReadOnly)
+		if (IsReadOnly)
 		{
 			return;
 		}

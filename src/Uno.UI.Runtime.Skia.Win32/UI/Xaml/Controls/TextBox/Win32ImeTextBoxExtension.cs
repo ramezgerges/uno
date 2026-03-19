@@ -36,29 +36,13 @@ internal sealed class Win32ImeTextBoxExtension : IImeTextBoxExtension
 
 	public void StartImeSession(TextBox textBox)
 	{
-		_hwnd = HWND.Null;
-
-		if (textBox.XamlRoot is not { } xamlRoot)
-		{
-			return;
-		}
-
-		if (XamlRootMap.GetHostForRoot(xamlRoot) is not Win32WindowWrapper wrapper)
-		{
-			return;
-		}
-
-		if (wrapper.NativeWindow is not Win32NativeWindow nativeWindow)
-		{
-			return;
-		}
-
-		_hwnd = (HWND)nativeWindow.Hwnd;
+		var wrapper = (Win32WindowWrapper)XamlRootMap.GetHostForRoot(textBox.XamlRoot!)!;
+		_hwnd = (HWND)((Win32NativeWindow)wrapper.NativeWindow!).Hwnd;
 	}
 
 	public void EndImeSession()
 	{
-		if (_isComposing && !_hwnd.IsNull)
+		if (_isComposing)
 		{
 			// Tell the IME to commit the active composition and close its windows
 			var himc = PInvoke.ImmGetContext(_hwnd);
@@ -80,11 +64,6 @@ internal sealed class Win32ImeTextBoxExtension : IImeTextBoxExtension
 	/// </summary>
 	internal void OnWmImeStartComposition()
 	{
-		if (_hwnd.IsNull)
-		{
-			return;
-		}
-
 		_isComposing = true;
 		CompositionStarted?.Invoke(this, EventArgs.Empty);
 	}
@@ -94,11 +73,6 @@ internal sealed class Win32ImeTextBoxExtension : IImeTextBoxExtension
 	/// </summary>
 	internal unsafe void OnWmImeComposition(LPARAM lParam)
 	{
-		if (_hwnd.IsNull)
-		{
-			return;
-		}
-
 		var himc = PInvoke.ImmGetContext(_hwnd);
 		if (himc.IsNull)
 		{
@@ -109,7 +83,6 @@ internal sealed class Win32ImeTextBoxExtension : IImeTextBoxExtension
 		{
 			var flags = (IME_COMPOSITION_STRING)(uint)lParam.Value;
 
-			// GCS_RESULTSTR: The user has committed text from the IME
 			if (flags.HasFlag(IME_COMPOSITION_STRING.GCS_RESULTSTR))
 			{
 				var text = GetCompositionString(himc, IME_COMPOSITION_STRING.GCS_RESULTSTR);
@@ -119,7 +92,6 @@ internal sealed class Win32ImeTextBoxExtension : IImeTextBoxExtension
 				}
 			}
 
-			// GCS_COMPSTR: The composition string has changed
 			if (flags.HasFlag(IME_COMPOSITION_STRING.GCS_COMPSTR))
 			{
 				var text = GetCompositionString(himc, IME_COMPOSITION_STRING.GCS_COMPSTR);
@@ -151,7 +123,6 @@ internal sealed class Win32ImeTextBoxExtension : IImeTextBoxExtension
 
 	private static unsafe string? GetCompositionString(HIMC himc, IME_COMPOSITION_STRING dwIndex)
 	{
-		// First call to get the byte length
 		var byteLen = PInvoke.ImmGetCompositionString(himc, dwIndex, null, 0);
 		if (byteLen <= 0)
 		{
