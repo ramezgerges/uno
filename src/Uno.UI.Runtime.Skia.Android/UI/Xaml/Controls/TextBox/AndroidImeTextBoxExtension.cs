@@ -27,8 +27,6 @@ internal sealed class AndroidImeTextBoxExtension : IImeTextBoxExtension
 	private int _lastComposingStart = -1;
 	private int _lastComposingEnd = -1;
 	private int _lastFullTextLength;
-	private TextInputConnection? _activeConnection;
-	private TextInputPlugin? _activePlugin;
 	private bool _sessionActive;
 
 	public bool IsComposing => _isComposing;
@@ -38,10 +36,10 @@ internal sealed class AndroidImeTextBoxExtension : IImeTextBoxExtension
 	public event EventHandler<ImeCompositionEventArgs>? CompositionCompleted;
 	public event EventHandler? CompositionEnded;
 
+	private static TextInputPlugin? Plugin => UnoSKCanvasView.Instance?.TextInputPlugin;
+
 	public void StartImeSession(TextBox textBox)
 	{
-		// Don't wire up composition events for PasswordBox — IME composition
-		// reveals characters, which is not appropriate for password fields.
 		if (textBox is PasswordBox)
 		{
 			return;
@@ -49,33 +47,26 @@ internal sealed class AndroidImeTextBoxExtension : IImeTextBoxExtension
 
 		_sessionActive = true;
 
-		// Get the active TextInputConnection from the TextInputPlugin.
-		// Also subscribe to InputConnectionCreated so we can re-subscribe
-		// when the system calls OnCreateInputConnection (which creates a new
-		// TextInputConnection, invalidating the previous one).
-		if (UnoSKCanvasView.Instance is { } canvasView)
+		if (Plugin is { } plugin)
 		{
-			_activePlugin = canvasView.TextInputPlugin;
-			_activePlugin.InputConnectionCreated += OnInputConnectionCreated;
-			SubscribeToConnection(_activePlugin.ActiveInputConnection);
+			plugin.InputConnectionCreated -= OnInputConnectionCreated;
+			plugin.InputConnectionCreated += OnInputConnectionCreated;
+
+			if (plugin.ActiveInputConnection is { } connection)
+			{
+				connection.CompositionStateChanged += OnCompositionStateChanged;
+			}
 		}
 
 		if (this.Log().IsEnabled(LogLevel.Debug))
 		{
-			this.Log().Debug($"IME session started. Connection: {(_activeConnection is not null ? "active" : "none")}");
+			this.Log().Debug("IME session started.");
 		}
 	}
 
 	public void EndImeSession()
 	{
 		_sessionActive = false;
-		UnsubscribeFromConnection();
-
-		if (_activePlugin is not null)
-		{
-			_activePlugin.InputConnectionCreated -= OnInputConnectionCreated;
-			_activePlugin = null;
-		}
 
 		if (_isComposing)
 		{
@@ -88,31 +79,9 @@ internal sealed class AndroidImeTextBoxExtension : IImeTextBoxExtension
 
 	private void OnInputConnectionCreated(TextInputConnection newConnection)
 	{
-		if (!_sessionActive)
+		if (_sessionActive)
 		{
-			return;
-		}
-
-		// A new connection was created — re-subscribe.
-		UnsubscribeFromConnection();
-		SubscribeToConnection(newConnection);
-	}
-
-	private void SubscribeToConnection(TextInputConnection? connection)
-	{
-		_activeConnection = connection;
-		if (_activeConnection is not null)
-		{
-			_activeConnection.CompositionStateChanged += OnCompositionStateChanged;
-		}
-	}
-
-	private void UnsubscribeFromConnection()
-	{
-		if (_activeConnection is not null)
-		{
-			_activeConnection.CompositionStateChanged -= OnCompositionStateChanged;
-			_activeConnection = null;
+			newConnection.CompositionStateChanged += OnCompositionStateChanged;
 		}
 	}
 
