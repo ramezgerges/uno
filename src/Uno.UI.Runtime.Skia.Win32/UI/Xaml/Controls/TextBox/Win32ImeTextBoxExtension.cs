@@ -1,8 +1,6 @@
 #nullable enable
 
 using System;
-using System.Runtime.InteropServices;
-using System.Text;
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.Input.Ime;
@@ -18,13 +16,8 @@ namespace Uno.UI.Runtime.Skia.Win32;
 /// Handles WM_IME_STARTCOMPOSITION, WM_IME_COMPOSITION, and WM_IME_ENDCOMPOSITION
 /// messages to provide IME support for TextBox on Win32 Skia.
 /// </summary>
-internal sealed partial class Win32ImeTextBoxExtension : IImeTextBoxExtension
+internal sealed class Win32ImeTextBoxExtension : IImeTextBoxExtension
 {
-	private const uint GCS_COMPSTR = 0x0008;
-	private const uint GCS_RESULTSTR = 0x0800;
-	private const uint NI_COMPOSITIONSTR = 0x0015;
-	private const uint CPS_COMPLETE = 0x0001;
-
 	internal static Win32ImeTextBoxExtension Instance { get; } = new();
 
 	private HWND _hwnd;
@@ -71,7 +64,7 @@ internal sealed partial class Win32ImeTextBoxExtension : IImeTextBoxExtension
 			var himc = PInvoke.ImmGetContext(_hwnd);
 			if (!himc.IsNull)
 			{
-				ImmNotifyIME(himc.Value, NI_COMPOSITIONSTR, CPS_COMPLETE, 0);
+				PInvoke.ImmNotifyIME(himc, NOTIFY_IME_ACTION.NI_COMPOSITIONSTR, NOTIFY_IME_INDEX.CPS_COMPLETE, 0);
 				PInvoke.ImmReleaseContext(_hwnd, himc);
 			}
 
@@ -114,12 +107,12 @@ internal sealed partial class Win32ImeTextBoxExtension : IImeTextBoxExtension
 
 		try
 		{
-			var flags = (uint)lParam.Value;
+			var flags = (IME_COMPOSITION_STRING)(uint)lParam.Value;
 
 			// GCS_RESULTSTR: The user has committed text from the IME
-			if ((flags & GCS_RESULTSTR) != 0)
+			if (flags.HasFlag(IME_COMPOSITION_STRING.GCS_RESULTSTR))
 			{
-				var text = GetCompositionString(himc, GCS_RESULTSTR);
+				var text = GetCompositionString(himc, IME_COMPOSITION_STRING.GCS_RESULTSTR);
 				if (text is not null)
 				{
 					CompositionCompleted?.Invoke(this, new ImeCompositionEventArgs(text));
@@ -127,9 +120,9 @@ internal sealed partial class Win32ImeTextBoxExtension : IImeTextBoxExtension
 			}
 
 			// GCS_COMPSTR: The composition string has changed
-			if ((flags & GCS_COMPSTR) != 0)
+			if (flags.HasFlag(IME_COMPOSITION_STRING.GCS_COMPSTR))
 			{
-				var text = GetCompositionString(himc, GCS_COMPSTR);
+				var text = GetCompositionString(himc, IME_COMPOSITION_STRING.GCS_COMPSTR);
 				if (text is not null)
 				{
 					CompositionUpdated?.Invoke(this, new ImeCompositionEventArgs(text));
@@ -156,29 +149,22 @@ internal sealed partial class Win32ImeTextBoxExtension : IImeTextBoxExtension
 		CompositionEnded?.Invoke(this, EventArgs.Empty);
 	}
 
-	private static unsafe string? GetCompositionString(HIMC himc, uint dwIndex)
+	private static unsafe string? GetCompositionString(HIMC himc, IME_COMPOSITION_STRING dwIndex)
 	{
 		// First call to get the byte length
-		var byteLen = ImmGetCompositionStringW(himc.Value, dwIndex, null, 0);
+		var byteLen = PInvoke.ImmGetCompositionString(himc, dwIndex, null, 0);
 		if (byteLen <= 0)
 		{
-			return dwIndex == GCS_COMPSTR ? string.Empty : null;
+			return dwIndex == IME_COMPOSITION_STRING.GCS_COMPSTR ? string.Empty : null;
 		}
 
 		var buffer = stackalloc byte[byteLen];
-		var result = ImmGetCompositionStringW(himc.Value, dwIndex, buffer, (uint)byteLen);
+		var result = PInvoke.ImmGetCompositionString(himc, dwIndex, buffer, (uint)byteLen);
 		if (result <= 0)
 		{
 			return null;
 		}
 
-		return Encoding.Unicode.GetString(buffer, result);
+		return new string((char*)buffer, 0, result / sizeof(char));
 	}
-
-	[LibraryImport("imm32.dll")]
-	private static unsafe partial int ImmGetCompositionStringW(nint hIMC, uint dwIndex, void* lpBuf, uint dwBufLen);
-
-	[LibraryImport("imm32.dll")]
-	[return: MarshalAs(UnmanagedType.Bool)]
-	private static partial bool ImmNotifyIME(nint hIMC, uint dwAction, uint dwIndex, uint dwValue);
 }
