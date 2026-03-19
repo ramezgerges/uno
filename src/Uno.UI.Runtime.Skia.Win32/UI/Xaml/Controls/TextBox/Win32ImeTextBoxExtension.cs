@@ -97,7 +97,8 @@ internal sealed class Win32ImeTextBoxExtension : IImeTextBoxExtension
 				var text = GetCompositionString(himc, IME_COMPOSITION_STRING.GCS_COMPSTR);
 				if (!string.IsNullOrEmpty(text))
 				{
-					CompositionUpdated?.Invoke(this, new ImeCompositionEventArgs(text));
+					var cursorPos = PInvoke.ImmGetCompositionString(himc, IME_COMPOSITION_STRING.GCS_CURSORPOS, null, 0);
+					CompositionUpdated?.Invoke(this, new ImeCompositionEventArgs(text, cursorPos));
 				}
 			}
 		}

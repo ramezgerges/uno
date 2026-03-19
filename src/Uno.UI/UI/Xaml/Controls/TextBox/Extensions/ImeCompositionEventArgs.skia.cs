@@ -12,8 +12,14 @@ internal class ImeCompositionEventArgs : EventArgs
 	/// </summary>
 	public string Text { get; }
 
-	public ImeCompositionEventArgs(string text)
+	/// <summary>
+	/// Cursor position within the composition string, or -1 if not available.
+	/// </summary>
+	public int CursorPosition { get; }
+
+	public ImeCompositionEventArgs(string text, int cursorPosition = -1)
 	{
 		Text = text;
+		CursorPosition = cursorPosition;
 	}
 }

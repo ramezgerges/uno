@@ -30,7 +30,7 @@ public partial class TextBox
 			if (_imeExtension is not null)
 			{
 				_imeExtension.CompositionStarted += static (_, _) => _activeImeTextBox?.OnImeCompositionStarted();
-				_imeExtension.CompositionUpdated += static (_, e) => _activeImeTextBox?.OnImeCompositionUpdated(e.Text);
+				_imeExtension.CompositionUpdated += static (_, e) => _activeImeTextBox?.OnImeCompositionUpdated(e.Text, e.CursorPosition);
 				_imeExtension.CompositionCompleted += static (_, e) => _activeImeTextBox?.OnImeCompositionCompleted(e.Text);
 				_imeExtension.CompositionEnded += static (_, _) => _activeImeTextBox?.OnImeCompositionEnded();
 			}
@@ -63,14 +63,14 @@ public partial class TextBox
 		TextCompositionStarted?.Invoke(this, new TextCompositionStartedEventArgs(_compositionStartIndex, 0));
 	}
 
-	private void OnImeCompositionUpdated(string compositionText)
+	private void OnImeCompositionUpdated(string compositionText, int cursorPosition)
 	{
 		if (IsReadOnly)
 		{
 			return;
 		}
 
-		ReplaceCompositionText(compositionText);
+		ReplaceCompositionText(compositionText, cursorPosition);
 		_compositionLength = compositionText.Length;
 
 		TextCompositionChanged?.Invoke(this, new TextCompositionChangedEventArgs(_compositionStartIndex, _compositionLength));
@@ -113,16 +113,20 @@ public partial class TextBox
 		InvalidateTextBoxRender();
 	}
 
-	private void ReplaceCompositionText(string newText)
+	private void ReplaceCompositionText(string newText, int cursorPosition = -1)
 	{
 		var text = Text;
 		var replaced = text[.._compositionStartIndex] + newText + text[(_compositionStartIndex + _compositionLength)..];
+
+		// Place the caret at the IME-reported cursor position within the composition,
+		// or at the end of the new text if not available.
+		var caretOffset = cursorPosition >= 0 ? cursorPosition : newText.Length;
 
 		_suppressCurrentlyTyping = true;
 		_clearHistoryOnTextChanged = false;
 		try
 		{
-			_pendingSelection = (_compositionStartIndex + newText.Length, 0);
+			_pendingSelection = (_compositionStartIndex + caretOffset, 0);
 			ProcessTextInput(replaced);
 		}
 		finally
@@ -150,7 +154,7 @@ public partial class TextBox
 		_imeExtension = extension;
 
 		EventHandler onStarted = (_, _) => _activeImeTextBox?.OnImeCompositionStarted();
-		EventHandler<ImeCompositionEventArgs> onUpdated = (_, e) => _activeImeTextBox?.OnImeCompositionUpdated(e.Text);
+		EventHandler<ImeCompositionEventArgs> onUpdated = (_, e) => _activeImeTextBox?.OnImeCompositionUpdated(e.Text, e.CursorPosition);
 		EventHandler<ImeCompositionEventArgs> onCompleted = (_, e) => _activeImeTextBox?.OnImeCompositionCompleted(e.Text);
 		EventHandler onEnded = (_, _) => _activeImeTextBox?.OnImeCompositionEnded();
 
