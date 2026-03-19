@@ -588,10 +588,7 @@ public partial class TextBox
 			if (focusState == FocusState.Unfocused && !_forceFocusedVisualState)
 			{
 				_imeExtension?.EndImeSession();
-				if (_activeImeTextBox == this)
-				{
-					_activeImeTextBox = null;
-				}
+				_activeImeTextBox = null;
 				TrySetCurrentlyTyping(false);
 				CaretMode = CaretDisplayMode.ThumblessCaretHidden;
 				if (SelectionFlyout?.IsOpen == true)
