@@ -98,7 +98,8 @@ internal sealed class Win32ImeTextBoxExtension : IImeTextBoxExtension
 				if (!string.IsNullOrEmpty(text))
 				{
 					var cursorPos = PInvoke.ImmGetCompositionString(himc, IME_COMPOSITION_STRING.GCS_CURSORPOS, null, 0);
-					CompositionUpdated?.Invoke(this, new ImeCompositionEventArgs(text, cursorPos));
+					var resolvedLen = GetResolvedLength(himc, text.Length);
+					CompositionUpdated?.Invoke(this, new ImeCompositionEventArgs(text, cursorPos, resolvedLen));
 				}
 			}
 		}
@@ -120,6 +121,40 @@ internal sealed class Win32ImeTextBoxExtension : IImeTextBoxExtension
 
 		_isComposing = false;
 		CompositionEnded?.Invoke(this, EventArgs.Empty);
+	}
+
+	/// <summary>
+	/// Counts leading characters in the composition that are already resolved
+	/// (ATTR_TARGET_CONVERTED or ATTR_FIXEDCONVERTED) using GCS_COMPATTR.
+	/// </summary>
+	private static unsafe int GetResolvedLength(HIMC himc, int compositionLength)
+	{
+		var byteLen = PInvoke.ImmGetCompositionString(himc, IME_COMPOSITION_STRING.GCS_COMPATTR, null, 0);
+		if (byteLen <= 0)
+		{
+			return 0;
+		}
+
+		var attrs = stackalloc byte[byteLen];
+		var result = PInvoke.ImmGetCompositionString(himc, IME_COMPOSITION_STRING.GCS_COMPATTR, attrs, (uint)byteLen);
+		if (result <= 0)
+		{
+			return 0;
+		}
+
+		// ATTR_INPUT = 0, ATTR_TARGET_CONVERTED = 1, ATTR_CONVERTED = 2,
+		// ATTR_TARGET_NOTCONVERTED = 3, ATTR_INPUT_ERROR = 4, ATTR_FIXEDCONVERTED = 5
+		// Count leading non-input characters (already converted/resolved).
+		var count = Math.Min(result, compositionLength);
+		for (var i = 0; i < count; i++)
+		{
+			if (attrs[i] == 0) // ATTR_INPUT
+			{
+				return i;
+			}
+		}
+
+		return count;
 	}
 
 	private static unsafe string? GetCompositionString(HIMC himc, IME_COMPOSITION_STRING dwIndex)

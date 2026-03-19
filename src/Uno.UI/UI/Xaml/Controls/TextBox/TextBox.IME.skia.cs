@@ -13,7 +13,7 @@ public partial class TextBox
 	private bool _isComposing;
 	private int _compositionStartIndex;
 	private int _compositionLength;
-	private int _compositionCursorOffset;
+	private int _compositionResolvedLength;
 
 	public event TypedEventHandler<TextBox, TextCompositionStartedEventArgs> TextCompositionStarted;
 	public event TypedEventHandler<TextBox, TextCompositionChangedEventArgs> TextCompositionChanged;
@@ -27,8 +27,8 @@ public partial class TextBox
 	/// The underline range within the composition, starting after any already-resolved characters.
 	/// Used by the renderer to only underline the active (unresolved) portion of the preedit.
 	/// </summary>
-	internal int CompositionUnderlineStart => _compositionStartIndex + _compositionCursorOffset;
-	internal int CompositionUnderlineLength => _compositionLength - _compositionCursorOffset;
+	internal int CompositionUnderlineStart => _compositionStartIndex + _compositionResolvedLength;
+	internal int CompositionUnderlineLength => Math.Max(0, _compositionLength - _compositionResolvedLength);
 
 	private void InitializeIme()
 	{
@@ -38,7 +38,7 @@ public partial class TextBox
 			if (_imeExtension is not null)
 			{
 				_imeExtension.CompositionStarted += static (_, _) => _activeImeTextBox?.OnImeCompositionStarted();
-				_imeExtension.CompositionUpdated += static (_, e) => _activeImeTextBox?.OnImeCompositionUpdated(e.Text, e.CursorPosition);
+				_imeExtension.CompositionUpdated += static (_, e) => _activeImeTextBox?.OnImeCompositionUpdated(e.Text, e.CursorPosition, e.ResolvedLength);
 				_imeExtension.CompositionCompleted += static (_, e) => _activeImeTextBox?.OnImeCompositionCompleted(e.Text);
 				_imeExtension.CompositionEnded += static (_, _) => _activeImeTextBox?.OnImeCompositionEnded();
 			}
@@ -67,12 +67,12 @@ public partial class TextBox
 		_isComposing = true;
 		_compositionStartIndex = SelectionStart;
 		_compositionLength = 0;
-		_compositionCursorOffset = 0;
+		_compositionResolvedLength = 0;
 
 		TextCompositionStarted?.Invoke(this, new TextCompositionStartedEventArgs(_compositionStartIndex, 0));
 	}
 
-	private void OnImeCompositionUpdated(string compositionText, int cursorPosition)
+	private void OnImeCompositionUpdated(string compositionText, int cursorPosition, int resolvedLength)
 	{
 		if (IsReadOnly)
 		{
@@ -81,7 +81,7 @@ public partial class TextBox
 
 		ReplaceCompositionText(compositionText, cursorPosition);
 		_compositionLength = compositionText.Length;
-		_compositionCursorOffset = cursorPosition >= 0 ? cursorPosition : 0;
+		_compositionResolvedLength = resolvedLength;
 
 		TextCompositionChanged?.Invoke(this, new TextCompositionChangedEventArgs(_compositionStartIndex, _compositionLength));
 		InvalidateTextBoxRender();
@@ -164,7 +164,7 @@ public partial class TextBox
 		_imeExtension = extension;
 
 		EventHandler onStarted = (_, _) => _activeImeTextBox?.OnImeCompositionStarted();
-		EventHandler<ImeCompositionEventArgs> onUpdated = (_, e) => _activeImeTextBox?.OnImeCompositionUpdated(e.Text, e.CursorPosition);
+		EventHandler<ImeCompositionEventArgs> onUpdated = (_, e) => _activeImeTextBox?.OnImeCompositionUpdated(e.Text, e.CursorPosition, e.ResolvedLength);
 		EventHandler<ImeCompositionEventArgs> onCompleted = (_, e) => _activeImeTextBox?.OnImeCompositionCompleted(e.Text);
 		EventHandler onEnded = (_, _) => _activeImeTextBox?.OnImeCompositionEnded();
 

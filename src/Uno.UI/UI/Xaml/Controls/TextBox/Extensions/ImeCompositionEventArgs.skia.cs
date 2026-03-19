@@ -17,9 +17,16 @@ internal class ImeCompositionEventArgs : EventArgs
 	/// </summary>
 	public int CursorPosition { get; }
 
-	public ImeCompositionEventArgs(string text, int cursorPosition = -1)
+	/// <summary>
+	/// Number of leading characters in the composition that are already resolved
+	/// (e.g., converted to final characters). The underline should start after these.
+	/// </summary>
+	public int ResolvedLength { get; }
+
+	public ImeCompositionEventArgs(string text, int cursorPosition = -1, int resolvedLength = 0)
 	{
 		Text = text;
 		CursorPosition = cursorPosition;
+		ResolvedLength = resolvedLength;
 	}
 }
