@@ -88,7 +88,7 @@ internal sealed class MacOSImeTextBoxExtension : IImeTextBoxExtension
 				_lastComposingText = text;
 
 				CompositionStarted?.Invoke(this, EventArgs.Empty);
-				CompositionUpdated?.Invoke(this, new ImeCompositionEventArgs(text));
+				CompositionUpdated?.Invoke(this, new ImeCompositionEventArgs(text, selectedStart));
 
 				if (this.Log().IsEnabled(LogLevel.Trace))
 				{
@@ -99,7 +99,7 @@ internal sealed class MacOSImeTextBoxExtension : IImeTextBoxExtension
 			{
 				// Transition: Composing → Composing (preedit update)
 				_lastComposingText = text;
-				CompositionUpdated?.Invoke(this, new ImeCompositionEventArgs(text));
+				CompositionUpdated?.Invoke(this, new ImeCompositionEventArgs(text, selectedStart));
 
 				if (this.Log().IsEnabled(LogLevel.Trace))
 				{
