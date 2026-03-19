@@ -935,9 +935,8 @@ internal readonly partial struct UnicodeText : IParsedText
 				var compEnd = compStart + compLen;
 				if (cluster.Value.start < compEnd && cluster.Value.end > compStart)
 				{
-					var fontSize = fontDetails.SKFontSize;
-					var yOffset = 2 * (fontSize / 12.0f);
-					var underlineY = y + line.baselineOffset + yOffset;
+					// Place the underline just below the baseline
+					var underlineY = y + line.baselineOffset + fontDetails.SKFontSize / 6.0f;
 					var underlineLeftX = unalignedX + alignmentOffset;
 					var underlineRightX = underlineLeftX + cluster.Value.width;
 					var foreColor = BrushToColor(_runBreaks[runBreakIndex].foreground, session.Opacity);
