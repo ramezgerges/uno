@@ -275,10 +275,16 @@ namespace Microsoft.UI.Xaml.Controls
 					}
 				}
 			}) : TextHighlighters;
+			(int startIndex, int length)? compositionRange = null;
+			if (OwningTextBox is { IsComposing: true, CompositionLength: > 0 } owningTextBox)
+			{
+				compositionRange = (owningTextBox.CompositionStartIndex, owningTextBox.CompositionLength);
+			}
 			ParsedText.Draw(
 				session,
 				_caretPaint is { } c ? (c.index, c.brush, CaretThickness) : null,
-				highligherters);
+				highligherters,
+				compositionRange);
 			session.Canvas.Restore();
 			DrawingFinished?.Invoke();
 		}

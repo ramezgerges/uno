@@ -75,6 +75,113 @@ public partial class TextBox
 
 	private MenuFlyout _proofingMenu;
 
+	// IME composition state
+	private static IImeTextBoxExtension _imeExtension;
+	private static TextBox _activeImeTextBox;
+	private bool _isComposing;
+	private int _compositionStartIndex;
+	private int _compositionLength;
+
+	// IME composition events
+	public event TypedEventHandler<TextBox, TextCompositionStartedEventArgs> TextCompositionStarted;
+	public event TypedEventHandler<TextBox, TextCompositionChangedEventArgs> TextCompositionChanged;
+	public event TypedEventHandler<TextBox, TextCompositionEndedEventArgs> TextCompositionEnded;
+
+	internal bool IsComposing => _isComposing;
+	internal int CompositionStartIndex => _compositionStartIndex;
+	internal int CompositionLength => _compositionLength;
+
+	private void OnImeCompositionStarted()
+	{
+		if (IsReadOnly)
+		{
+			return;
+		}
+
+		_isComposing = true;
+		_compositionStartIndex = SelectionStart;
+		_compositionLength = 0;
+
+		TextCompositionStarted?.Invoke(this, new TextCompositionStartedEventArgs(_compositionStartIndex, 0));
+	}
+
+	private void OnImeCompositionUpdated(string compositionText)
+	{
+		if (!_isComposing || IsReadOnly)
+		{
+			return;
+		}
+
+		ReplaceCompositionText(compositionText);
+		_compositionLength = compositionText.Length;
+
+		TextCompositionChanged?.Invoke(this, new TextCompositionChangedEventArgs(_compositionStartIndex, _compositionLength));
+		InvalidateTextBoxRender();
+	}
+
+	private void OnImeCompositionCompleted(string committedText)
+	{
+		if (!_isComposing || IsReadOnly)
+		{
+			return;
+		}
+
+		TrySetCurrentlyTyping(true);
+		ReplaceCompositionText(committedText);
+
+		var startIndex = _compositionStartIndex;
+		var committedLength = committedText.Length;
+		_isComposing = false;
+		_compositionLength = 0;
+		_compositionStartIndex = 0;
+
+		TextCompositionEnded?.Invoke(this, new TextCompositionEndedEventArgs(startIndex, committedLength));
+		InvalidateTextBoxRender();
+	}
+
+	private void OnImeCompositionEnded()
+	{
+		if (!_isComposing)
+		{
+			return;
+		}
+
+		// Composition ended without explicit commit — keep text as-is (matches WinUI behavior).
+		// The composition text was already inserted via ProcessTextInput during OnImeCompositionUpdated.
+		_isComposing = false;
+		_compositionLength = 0;
+		_compositionStartIndex = 0;
+
+		InvalidateTextBoxRender();
+	}
+
+	private void ReplaceCompositionText(string newText)
+	{
+		var text = Text;
+		var replaced = text[.._compositionStartIndex] + newText + text[(_compositionStartIndex + _compositionLength)..];
+
+		_suppressCurrentlyTyping = true;
+		_clearHistoryOnTextChanged = false;
+		try
+		{
+			_pendingSelection = (_compositionStartIndex + newText.Length, 0);
+			ProcessTextInput(replaced);
+		}
+		finally
+		{
+			_clearHistoryOnTextChanged = true;
+			_suppressCurrentlyTyping = false;
+		}
+	}
+
+	private void InvalidateTextBoxRender()
+	{
+		if (TextBoxView?.DisplayBlock.Visual is { } visual)
+		{
+			Visual.Compositor.InvalidateRender(visual);
+		}
+	}
+
 	internal bool IsBackwardSelection => _selection.selectionEndsAtTheStart;
 
 	internal TextBoxView TextBoxView => _textBoxView;
@@ -456,6 +563,8 @@ public partial class TextBox
 			{
 				CaretMode = CaretDisplayMode.ThumblessCaretShowing;
 				_textBoxNotificationsSingleton?.OnFocused(this);
+				_activeImeTextBox = this;
+				_imeExtension?.StartImeSession(this);
 				UpdateCanPasteClipboardContent();
 				Clipboard.ContentChanged += OnClipboardContentChanged;
 				_clipboardChangeSubscription.Disposable = Disposable.Create(() => Clipboard.ContentChanged -= OnClipboardContentChanged);
@@ -478,6 +587,11 @@ public partial class TextBox
 
 			if (focusState == FocusState.Unfocused && !_forceFocusedVisualState)
 			{
+				_imeExtension?.EndImeSession();
+				if (_activeImeTextBox == this)
+				{
+					_activeImeTextBox = null;
+				}
 				TrySetCurrentlyTyping(false);
 				CaretMode = CaretDisplayMode.ThumblessCaretHidden;
 				if (SelectionFlyout?.IsOpen == true)
@@ -990,6 +1104,12 @@ public partial class TextBox
 				}
 				break;
 			default:
+				// During IME composition, skip normal character insertion.
+				// The IME extension handles text updates via OnImeCompositionUpdated → ProcessTextInput.
+				if (_isComposing)
+				{
+					return;
+				}
 				var isEnterKey = args.UnicodeKey is '\r' or '\n' || args.Key == VirtualKey.Enter;
 				if (!IsReadOnly && !HasPointerCapture && args.UnicodeKey is { } key && (!isEnterKey || AcceptsReturn))
 				{
@@ -1510,6 +1630,59 @@ public partial class TextBox
 	partial void InitializePartial()
 	{
 		_ = ApiExtensibility.CreateInstance(null, out _textBoxNotificationsSingleton);
+
+		if (_imeExtension is null)
+		{
+			_ = ApiExtensibility.CreateInstance(null, out _imeExtension);
+			WireImeExtensionEvents();
+		}
+	}
+
+	private static EventHandler _imeStartedHandler;
+	private static EventHandler<Uno.UI.Xaml.Controls.Extensions.ImeCompositionEventArgs> _imeUpdatedHandler;
+	private static EventHandler<Uno.UI.Xaml.Controls.Extensions.ImeCompositionEventArgs> _imeCompletedHandler;
+	private static EventHandler _imeEndedHandler;
+
+	private static void WireImeExtensionEvents()
+	{
+		if (_imeExtension is null)
+		{
+			return;
+		}
+
+		// Remove previous handlers if any (for testing scenario)
+		if (_imeStartedHandler is not null)
+		{
+			_imeExtension.CompositionStarted -= _imeStartedHandler;
+			_imeExtension.CompositionUpdated -= _imeUpdatedHandler;
+			_imeExtension.CompositionCompleted -= _imeCompletedHandler;
+			_imeExtension.CompositionEnded -= _imeEndedHandler;
+		}
+
+		_imeStartedHandler = (_, _) => _activeImeTextBox?.OnImeCompositionStarted();
+		_imeUpdatedHandler = (_, e) => _activeImeTextBox?.OnImeCompositionUpdated(e.Text);
+		_imeCompletedHandler = (_, e) => _activeImeTextBox?.OnImeCompositionCompleted(e.Text);
+		_imeEndedHandler = (_, _) => _activeImeTextBox?.OnImeCompositionEnded();
+
+		_imeExtension.CompositionStarted += _imeStartedHandler;
+		_imeExtension.CompositionUpdated += _imeUpdatedHandler;
+		_imeExtension.CompositionCompleted += _imeCompletedHandler;
+		_imeExtension.CompositionEnded += _imeEndedHandler;
+	}
+
+	/// <summary>
+	/// Installs a fake IME extension for testing. Returns a disposable that restores the original.
+	/// </summary>
+	internal static IDisposable SetImeExtensionForTesting(Uno.UI.Xaml.Controls.Extensions.IImeTextBoxExtension extension)
+	{
+		var original = _imeExtension;
+		_imeExtension = extension;
+		WireImeExtensionEvents();
+		return Disposable.Create(() =>
+		{
+			_imeExtension = original;
+			WireImeExtensionEvents();
+		});
 	}
 
 	partial void OnTextChangedPartial()
