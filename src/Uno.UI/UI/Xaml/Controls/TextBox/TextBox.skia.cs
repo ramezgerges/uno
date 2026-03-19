@@ -1631,54 +1631,42 @@ public partial class TextBox
 		if (_imeExtension is null)
 		{
 			_ = ApiExtensibility.CreateInstance(null, out _imeExtension);
-			WireImeExtensionEvents();
+			if (_imeExtension is not null)
+			{
+				_imeExtension.CompositionStarted += (_, _) => _activeImeTextBox?.OnImeCompositionStarted();
+				_imeExtension.CompositionUpdated += (_, e) => _activeImeTextBox?.OnImeCompositionUpdated(e.Text);
+				_imeExtension.CompositionCompleted += (_, e) => _activeImeTextBox?.OnImeCompositionCompleted(e.Text);
+				_imeExtension.CompositionEnded += (_, _) => _activeImeTextBox?.OnImeCompositionEnded();
+			}
 		}
-	}
-
-	private static EventHandler _imeStartedHandler;
-	private static EventHandler<Uno.UI.Xaml.Controls.Extensions.ImeCompositionEventArgs> _imeUpdatedHandler;
-	private static EventHandler<Uno.UI.Xaml.Controls.Extensions.ImeCompositionEventArgs> _imeCompletedHandler;
-	private static EventHandler _imeEndedHandler;
-
-	private static void WireImeExtensionEvents()
-	{
-		if (_imeExtension is null)
-		{
-			return;
-		}
-
-		// Remove previous handlers if any (for testing scenario)
-		if (_imeStartedHandler is not null)
-		{
-			_imeExtension.CompositionStarted -= _imeStartedHandler;
-			_imeExtension.CompositionUpdated -= _imeUpdatedHandler;
-			_imeExtension.CompositionCompleted -= _imeCompletedHandler;
-			_imeExtension.CompositionEnded -= _imeEndedHandler;
-		}
-
-		_imeStartedHandler = (_, _) => _activeImeTextBox?.OnImeCompositionStarted();
-		_imeUpdatedHandler = (_, e) => _activeImeTextBox?.OnImeCompositionUpdated(e.Text);
-		_imeCompletedHandler = (_, e) => _activeImeTextBox?.OnImeCompositionCompleted(e.Text);
-		_imeEndedHandler = (_, _) => _activeImeTextBox?.OnImeCompositionEnded();
-
-		_imeExtension.CompositionStarted += _imeStartedHandler;
-		_imeExtension.CompositionUpdated += _imeUpdatedHandler;
-		_imeExtension.CompositionCompleted += _imeCompletedHandler;
-		_imeExtension.CompositionEnded += _imeEndedHandler;
 	}
 
 	/// <summary>
-	/// Installs a fake IME extension for testing. Returns a disposable that restores the original.
+	/// Installs a fake IME extension for testing. The extension's events are
+	/// forwarded to the active TextBox. Returns a disposable that restores the original.
 	/// </summary>
 	internal static IDisposable SetImeExtensionForTesting(Uno.UI.Xaml.Controls.Extensions.IImeTextBoxExtension extension)
 	{
 		var original = _imeExtension;
 		_imeExtension = extension;
-		WireImeExtensionEvents();
+
+		EventHandler onStarted = (_, _) => _activeImeTextBox?.OnImeCompositionStarted();
+		EventHandler<Uno.UI.Xaml.Controls.Extensions.ImeCompositionEventArgs> onUpdated = (_, e) => _activeImeTextBox?.OnImeCompositionUpdated(e.Text);
+		EventHandler<Uno.UI.Xaml.Controls.Extensions.ImeCompositionEventArgs> onCompleted = (_, e) => _activeImeTextBox?.OnImeCompositionCompleted(e.Text);
+		EventHandler onEnded = (_, _) => _activeImeTextBox?.OnImeCompositionEnded();
+
+		extension.CompositionStarted += onStarted;
+		extension.CompositionUpdated += onUpdated;
+		extension.CompositionCompleted += onCompleted;
+		extension.CompositionEnded += onEnded;
+
 		return Disposable.Create(() =>
 		{
+			extension.CompositionStarted -= onStarted;
+			extension.CompositionUpdated -= onUpdated;
+			extension.CompositionCompleted -= onCompleted;
+			extension.CompositionEnded -= onEnded;
 			_imeExtension = original;
-			WireImeExtensionEvents();
 		});
 	}
 
