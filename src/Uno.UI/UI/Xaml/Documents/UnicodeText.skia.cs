@@ -805,7 +805,7 @@ internal readonly partial struct UnicodeText : IParsedText
 	public void Draw(in Visual.PaintingSession session,
 		(int index, CompositionBrush brush, float thickness)? caret, // null to skip drawing a caret
 		IEnumerable<TextHighlighter> highlighters,
-		(int startIndex, int length)? compositionRange = null)
+		(int startIndex, int length)? compositionRange)
 	{
 		var highlighterSlicer = new RangeSlicer<(CompositionBrush? background, Brush foreground)>(0, _text.Length);
 		foreach (var highlighter in highlighters)

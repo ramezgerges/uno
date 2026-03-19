@@ -5,12 +5,6 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace Uno.UI.Xaml.Controls.Extensions;
 
-/// <summary>
-/// Platform-specific extension for IME (Input Method Editor) support in TextBox.
-/// Each platform provides an implementation registered via ApiExtensibility.
-/// The extension intercepts native IME events and forwards composition state
-/// to the managed TextBox layer.
-/// </summary>
 internal interface IImeTextBoxExtension
 {
 	/// <summary>

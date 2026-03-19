@@ -10,7 +10,7 @@ internal interface IParsedText
 	void Draw(in Visual.PaintingSession session,
 		(int index, CompositionBrush brush, float thickness)? caret, // null to skip drawing a caret
 		IEnumerable<TextHighlighter> highlighters,
-		(int startIndex, int length)? compositionRange = null // IME composition underline range
+		(int startIndex, int length)? compositionRange
 	);
 
 	Rect GetRectForIndex(int adjustedIndex);

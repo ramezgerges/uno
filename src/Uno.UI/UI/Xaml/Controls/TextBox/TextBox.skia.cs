@@ -87,7 +87,7 @@ public partial class TextBox
 	public event TypedEventHandler<TextBox, TextCompositionChangedEventArgs> TextCompositionChanged;
 	public event TypedEventHandler<TextBox, TextCompositionEndedEventArgs> TextCompositionEnded;
 
-	internal bool IsComposing => _isComposing;
+	internal bool IsComposing => _isComposing; // Just for testing
 	internal int CompositionStartIndex => _compositionStartIndex;
 	internal int CompositionLength => _compositionLength;
 
@@ -1633,10 +1633,10 @@ public partial class TextBox
 			_ = ApiExtensibility.CreateInstance(null, out _imeExtension);
 			if (_imeExtension is not null)
 			{
-				_imeExtension.CompositionStarted += (_, _) => _activeImeTextBox?.OnImeCompositionStarted();
-				_imeExtension.CompositionUpdated += (_, e) => _activeImeTextBox?.OnImeCompositionUpdated(e.Text);
-				_imeExtension.CompositionCompleted += (_, e) => _activeImeTextBox?.OnImeCompositionCompleted(e.Text);
-				_imeExtension.CompositionEnded += (_, _) => _activeImeTextBox?.OnImeCompositionEnded();
+				_imeExtension.CompositionStarted += static (_, _) => _activeImeTextBox?.OnImeCompositionStarted();
+				_imeExtension.CompositionUpdated += static (_, e) => _activeImeTextBox?.OnImeCompositionUpdated(e.Text);
+				_imeExtension.CompositionCompleted += static (_, e) => _activeImeTextBox?.OnImeCompositionCompleted(e.Text);
+				_imeExtension.CompositionEnded += static (_, _) => _activeImeTextBox?.OnImeCompositionEnded();
 			}
 		}
 	}
