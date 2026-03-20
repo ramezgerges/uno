@@ -1,11 +1,15 @@
 ﻿namespace Uno.UI.Runtime.Skia {
 	export class BrowserInvisibleTextBoxViewExtension {
 		private static _exports: any;
+		private static _imeExports: any;
 		private static readonly inputElementId = "uno-input";
 		private static readonly isMacOS = navigator?.platform.toUpperCase().includes('MAC') ?? false;
 		private static inputElement: HTMLInputElement | HTMLTextAreaElement;
 		private static isInSelectionChange: boolean;
 		private static acceptsReturn: boolean;
+		private static isComposing: boolean;
+		private static suppressNextInput: boolean;
+		private static compositionStartOffset: number;
 
 		private static waitingAsyncOnSelectionChange: boolean;
 		private static nextSelectionStart: number;
@@ -21,6 +25,7 @@
 				const browserExports = WebAssemblyWindowWrapper.getAssemblyExports();
 
 				BrowserInvisibleTextBoxViewExtension._exports = browserExports.Uno.UI.Runtime.Skia.BrowserInvisibleTextBoxViewExtension;
+				BrowserInvisibleTextBoxViewExtension._imeExports = browserExports.Uno.UI.Runtime.Skia.WasmImeTextBoxExtension;
 
 				document.onselectionchange = () => {
 					let input = document.activeElement;
@@ -77,6 +82,13 @@
 			input.setAttribute("enterkeyhint", enterKeyHint);
 
 			input.oninput = ev => {
+				// During IME composition, text state is managed by the composition event path.
+				// The oninput event still fires but we must skip the normal text sync.
+				// Also suppress the final input event after compositionend (browser fires input after compositionend).
+				if (BrowserInvisibleTextBoxViewExtension.isComposing || BrowserInvisibleTextBoxViewExtension.suppressNextInput) {
+					BrowserInvisibleTextBoxViewExtension.suppressNextInput = false;
+					return;
+				}
 				let input = ev.target as HTMLInputElement;
 				if (input.selectionDirection == "backward") {
 					BrowserInvisibleTextBoxViewExtension._exports.OnInputTextChanged(input.value, input.selectionEnd, input.selectionStart - input.selectionEnd);
@@ -101,6 +113,13 @@
 			});
 
 			input.onkeydown = ev => {
+				// During IME composition, let the browser/IME handle all keys.
+				// stopPropagation prevents BrowserKeyboardInputSource from calling preventDefault.
+				if (ev.isComposing) {
+					ev.stopPropagation();
+					return;
+				}
+
 				if (ev.ctrlKey || (ev.metaKey && BrowserInvisibleTextBoxViewExtension.isMacOS)) {
 					// Due to browser security considerations, we need to let the clipboard operations be handled natively.
 					// So, we do stopPropagation instead of preventDefault
@@ -135,6 +154,31 @@
 					ev.stopPropagation();
 				}
 			};
+
+			input.addEventListener("compositionstart", () => {
+				BrowserInvisibleTextBoxViewExtension.isComposing = true;
+				BrowserInvisibleTextBoxViewExtension.compositionStartOffset = BrowserInvisibleTextBoxViewExtension.inputElement?.selectionStart ?? 0;
+				BrowserInvisibleTextBoxViewExtension._imeExports.OnCompositionStarted();
+			});
+
+			input.addEventListener("compositionupdate", (ev: CompositionEvent) => {
+				const input = BrowserInvisibleTextBoxViewExtension.inputElement;
+				const absolutePos = input?.selectionStart ?? 0;
+				const cursorPos = absolutePos - BrowserInvisibleTextBoxViewExtension.compositionStartOffset;
+				BrowserInvisibleTextBoxViewExtension._imeExports.OnCompositionUpdated(ev.data, cursorPos);
+			});
+
+			input.addEventListener("compositionend", (ev: CompositionEvent) => {
+				BrowserInvisibleTextBoxViewExtension.isComposing = false;
+				// The browser fires an input event after compositionend with the committed text.
+				// Suppress it to avoid double-inserting — the commit is handled by OnCompositionCompleted.
+				BrowserInvisibleTextBoxViewExtension.suppressNextInput = true;
+				if (ev.data.length > 0) {
+					BrowserInvisibleTextBoxViewExtension._imeExports.OnCompositionCompleted(ev.data);
+				} else {
+					BrowserInvisibleTextBoxViewExtension._imeExports.OnCompositionEnded();
+				}
+			});
 
 			document.body.appendChild(input);
 			BrowserInvisibleTextBoxViewExtension.inputElement = input;
