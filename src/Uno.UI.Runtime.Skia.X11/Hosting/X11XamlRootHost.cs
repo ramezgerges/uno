@@ -346,7 +346,28 @@ internal partial class X11XamlRootHost : IXamlRootHost
 		IntPtr rootXWindow = XLib.XRootWindow(display, screen);
 		_x11Window = CreateSoftwareRenderWindow(display, screen, size, rootXWindow);
 		var topWindowDisplay = XLib.XOpenDisplay(IntPtr.Zero);
-		if (FeatureConfiguration.Rendering.UseOpenGLOnX11 ?? true)
+		var rendererOverride = Environment.GetEnvironmentVariable("UNO_RENDERER")?.ToLowerInvariant();
+		if (rendererOverride == "graphite")
+		{
+			try
+			{
+				_x11TopWindow = CreateSoftwareRenderWindow(topWindowDisplay, screen, size, RootX11Window.Window);
+				_renderer = new X11VulkanGraphiteRenderer(this, TopX11Window);
+				this.Log().Info("Renderer: Graphite (Vulkan)");
+			}
+			catch (Exception e)
+			{
+				this.Log().Warn($"Graphite renderer failed: {e.Message}. Falling back to OpenGL/Ganesh.");
+				if (_x11TopWindow is not null)
+				{
+					_ = XLib.XDestroyWindow(_x11TopWindow.Value.Display, _x11TopWindow.Value.Window);
+					_x11TopWindow = null;
+				}
+				_renderer = null; // trigger fallback below
+			}
+		}
+
+		if (_renderer is null && (FeatureConfiguration.Rendering.UseOpenGLOnX11 ?? true))
 		{
 			try
 			{
@@ -396,11 +417,20 @@ internal partial class X11XamlRootHost : IXamlRootHost
 				}
 			}
 		}
-		else
+		else if (_renderer is null)
 		{
 			this.Log().Info($"Forcing software rendering.");
 			_x11TopWindow = CreateSoftwareRenderWindow(topWindowDisplay, screen, size, RootX11Window.Window);
 			_renderer = new X11SoftwareRenderer(this, TopX11Window);
+		}
+
+		if (_renderer is X11OpenGLRenderer or X11EGLRenderer)
+		{
+			this.Log().Info("Renderer: Ganesh (OpenGL)");
+		}
+		else if (_renderer is X11SoftwareRenderer)
+		{
+			this.Log().Info("Renderer: Software");
 		}
 
 		// Only XI2.2 has touch events, and that's pretty much the only reason we're using XI2,
