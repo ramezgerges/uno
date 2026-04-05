@@ -54,7 +54,8 @@ namespace SkiaSharpExample
 						global::Uno.Foundation.Extensibility.ApiExtensibility.Register<Microsoft.Web.WebView2.Core.CoreWebView2>(typeof(Microsoft.Web.WebView2.Core.INativeWebViewProvider), o => new global::Uno.UI.WebView.Skia.X11.X11NativeWebViewProvider(o));
 					}
 				})
-				.UseX11(hostBuilder => hostBuilder.PreloadMediaPlayer(true))
+				.UseWayland()
+			.UseX11(hostBuilder => hostBuilder.PreloadMediaPlayer(true))
 				.UseWin32(hostBuilder => hostBuilder.PreloadMediaPlayer(true))
 				.UseWindows()
 				.UseLinuxFrameBuffer(hostBuilder => hostBuilder.XkbKeymap(new(layout: "us,ara", options: "grp:alt_shift_toggle")))

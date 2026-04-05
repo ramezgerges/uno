@@ -29,6 +29,7 @@ using global::System.Runtime.InteropServices;
 [assembly: InternalsVisibleTo("Uno.UI.Runtime.Skia.Tizen")]
 [assembly: InternalsVisibleTo("Uno.UI.Runtime.Skia.Linux.FrameBuffer")]
 [assembly: InternalsVisibleTo("Uno.UI.Runtime.Skia.X11")]
+[assembly: InternalsVisibleTo("Uno.UI.Runtime.Skia.Wayland")]
 [assembly: InternalsVisibleTo("Uno.UI.Runtime.Skia.WebAssembly.Browser")]
 [assembly: InternalsVisibleTo("Uno.UI.Runtime.Skia.Android")]
 [assembly: InternalsVisibleTo("Uno.UI.Runtime.Skia.AppleUIKit")]
