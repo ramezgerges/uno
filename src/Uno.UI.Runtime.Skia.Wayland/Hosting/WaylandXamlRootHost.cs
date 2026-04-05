@@ -1,10 +1,15 @@
 using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.UI.Xaml;
+using Uno.Foundation.Logging;
 using Uno.UI.Hosting;
+using Windows.Foundation;
 using Windows.UI.Core;
+using Windows.UI.ViewManagement;
 
 namespace Uno.WinUI.Runtime.Skia.Wayland;
 
@@ -21,35 +26,352 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	private WaylandPointerInputSource? _pointerSource;
 	private WaylandKeyboardInputSource? _keyboardSource;
 
+	// Wayland protocol objects
+	private IntPtr _wlDisplay;
+	private IntPtr _wlRegistry;
+	private IntPtr _wlCompositor;
+	private IntPtr _wlShm;
+	private IntPtr _wlSeat;
+	private IntPtr _xdgWmBase;
+	private IntPtr _wlSurface;
+	private IntPtr _xdgSurface;
+	private IntPtr _xdgToplevel;
+
+	// Render thread
+	private WaylandRenderer? _renderer;
+	private Thread? _renderThread;
+	private volatile bool _renderLoopRunning = true;
+
+	// Window state
+	private int _width;
+	private int _height;
+#pragma warning disable CS0414 // Field is assigned but its value is never used
+	private bool _configured;
+#pragma warning restore CS0414
+
+	// GC preventing delegate collection
+	private WlRegistryGlobalDelegate? _registryGlobalDelegate;
+	private WlRegistryGlobalRemoveDelegate? _registryGlobalRemoveDelegate;
+	private XdgWmBasePingDelegate? _xdgWmBasePingDelegate;
+	private XdgSurfaceConfigureDelegate? _xdgSurfaceConfigureDelegate;
+	private XdgToplevelConfigureDelegate? _xdgToplevelConfigureDelegate;
+	private XdgToplevelCloseDelegate? _xdgToplevelCloseDelegate;
+
+	// Pinned listener structs
+	private GCHandle _registryListenerHandle;
+	private GCHandle _xdgWmBaseListenerHandle;
+	private GCHandle _xdgSurfaceListenerHandle;
+	private GCHandle _xdgToplevelListenerHandle;
+
 	internal WaylandXamlRootHost(WaylandWindowWrapper wrapper, Window window, XamlRoot xamlRoot)
 	{
 		_wrapper = wrapper;
 		_window = window;
+
+		var size = ApplicationView.PreferredLaunchViewSize;
+		_width = size != Size.Empty ? (int)size.Width : 1280;
+		_height = size != Size.Empty ? (int)size.Height : 800;
+
+		Initialize();
+
 		_windowToHost[window] = this;
 		_firstWindowCreated = true;
+
+		XamlRootMap.Register(xamlRoot, this);
+
+		// Start render thread
+		_renderThread = new Thread(RenderLoop)
+		{
+			IsBackground = true,
+			Name = "WaylandRenderThread",
+			Priority = ThreadPriority.AboveNormal
+		};
+		_renderThread.Start();
 	}
 
 	public Task Closed => _closedTcs.Task;
 
-	/// <summary>
-	/// The EGL display associated with this host, set during renderer initialization.
-	/// </summary>
 	internal IntPtr EglDisplay { get; set; }
+	internal IntPtr WlDisplay => _wlDisplay;
+	internal IntPtr WlSurface => _wlSurface;
+	internal IntPtr WlShm => _wlShm;
+	internal int Width => _width;
+	internal int Height => _height;
 
 	UIElement? IXamlRootHost.RootElement => _window.RootElement;
 
 	void IXamlRootHost.InvalidateRender()
 	{
+		if (!_closedTcs.Task.IsCompleted)
+		{
+			_renderEvent.Set();
+		}
+	}
+
+	private void Initialize()
+	{
+		_wlDisplay = WaylandBindings.wl_display_connect(null);
+		if (_wlDisplay == IntPtr.Zero)
+		{
+			throw new InvalidOperationException("Failed to connect to Wayland display");
+		}
+
+		_wlRegistry = WaylandBindings.wl_display_get_registry(_wlDisplay);
+
+		// Set up registry listener
+		_registryGlobalDelegate = OnRegistryGlobal;
+		_registryGlobalRemoveDelegate = OnRegistryGlobalRemove;
+		var registryListener = new WlRegistryListener
+		{
+			global = Marshal.GetFunctionPointerForDelegate(_registryGlobalDelegate),
+			global_remove = Marshal.GetFunctionPointerForDelegate(_registryGlobalRemoveDelegate),
+		};
+		_registryListenerHandle = GCHandle.Alloc(registryListener, GCHandleType.Pinned);
+		_ = WaylandBindings.wl_proxy_add_listener(_wlRegistry, _registryListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
+
+		// Roundtrip to receive all globals
+		_ = WaylandBindings.wl_display_roundtrip(_wlDisplay);
+
+		if (_wlCompositor == IntPtr.Zero)
+		{
+			throw new InvalidOperationException("Wayland compositor not found");
+		}
+		if (_xdgWmBase == IntPtr.Zero)
+		{
+			throw new InvalidOperationException("xdg_wm_base not found — compositor doesn't support xdg-shell");
+		}
+
+		// Create surface
+		// wl_compositor.create_surface opcode = 0
+		_wlSurface = WaylandBindings.wl_proxy_marshal_flags(
+			_wlCompositor, 0, WaylandInterfaces.wl_surface_interface, WaylandBindings.wl_proxy_get_version(_wlCompositor), 0, IntPtr.Zero);
+
+		if (_wlSurface == IntPtr.Zero)
+		{
+			throw new InvalidOperationException("Failed to create Wayland surface");
+		}
+
+		// Create xdg_surface
+		// xdg_wm_base.get_xdg_surface opcode = 2, args: new_id, surface
+		_xdgSurface = WaylandBindings.wl_proxy_marshal_flags(
+			_xdgWmBase, XdgShell.XDG_WM_BASE_GET_XDG_SURFACE, IntPtr.Zero,
+			WaylandBindings.wl_proxy_get_version(_xdgWmBase), 0, IntPtr.Zero, _wlSurface);
+
+		// Set up xdg_surface listener
+		_xdgSurfaceConfigureDelegate = OnXdgSurfaceConfigure;
+		var xdgSurfaceListener = new XdgSurfaceListener
+		{
+			configure = Marshal.GetFunctionPointerForDelegate(_xdgSurfaceConfigureDelegate),
+		};
+		_xdgSurfaceListenerHandle = GCHandle.Alloc(xdgSurfaceListener, GCHandleType.Pinned);
+		_ = WaylandBindings.wl_proxy_add_listener(_xdgSurface, _xdgSurfaceListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
+
+		// Create xdg_toplevel
+		// xdg_surface.get_toplevel opcode = 1
+		_xdgToplevel = WaylandBindings.wl_proxy_marshal_flags(
+			_xdgSurface, XdgShell.XDG_SURFACE_GET_TOPLEVEL, IntPtr.Zero,
+			WaylandBindings.wl_proxy_get_version(_xdgSurface), 0, IntPtr.Zero);
+
+		// Set up xdg_toplevel listener
+		_xdgToplevelConfigureDelegate = OnXdgToplevelConfigure;
+		_xdgToplevelCloseDelegate = OnXdgToplevelClose;
+		var xdgToplevelListener = new XdgToplevelListener
+		{
+			configure = Marshal.GetFunctionPointerForDelegate(_xdgToplevelConfigureDelegate),
+			close = Marshal.GetFunctionPointerForDelegate(_xdgToplevelCloseDelegate),
+			configure_bounds = IntPtr.Zero,
+			wm_capabilities = IntPtr.Zero,
+		};
+		_xdgToplevelListenerHandle = GCHandle.Alloc(xdgToplevelListener, GCHandleType.Pinned);
+		_ = WaylandBindings.wl_proxy_add_listener(_xdgToplevel, _xdgToplevelListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
+
+		// Set app ID and title
+		// xdg_toplevel.set_app_id opcode = 3
+		SetToplevelString(XdgShell.XDG_TOPLEVEL_SET_APP_ID, "uno-platform");
+		SetToplevelString(XdgShell.XDG_TOPLEVEL_SET_TITLE, "Uno Platform");
+
+		// Initial commit to get the first configure event
+		// wl_surface.commit opcode = 6
+		WaylandBindings.wl_proxy_marshal_flags(
+			_wlSurface, 6, IntPtr.Zero, WaylandBindings.wl_proxy_get_version(_wlSurface), 0);
+
+		// Roundtrip to receive the configure event
+		_ = WaylandBindings.wl_display_roundtrip(_wlDisplay);
+
+		// Create renderer (software for now, EGL can be added later)
+		if (_wlShm != IntPtr.Zero)
+		{
+			_renderer = new WaylandSoftwareRenderer(this, _wlDisplay, _wlSurface, _wlShm);
+		}
+
+		if (this.Log().IsEnabled(LogLevel.Information))
+		{
+			this.Log().Info($"Wayland window initialized: {_width}x{_height}, renderer={_renderer?.GetType().Name ?? "none"}");
+		}
+	}
+
+	private void SetToplevelString(uint opcode, string value)
+	{
+		var strPtr = Marshal.StringToHGlobalAnsi(value);
+		try
+		{
+			WaylandBindings.wl_proxy_marshal_flags(
+				_xdgToplevel, opcode, IntPtr.Zero,
+				WaylandBindings.wl_proxy_get_version(_xdgToplevel), 0, strPtr);
+		}
+		finally
+		{
+			Marshal.FreeHGlobal(strPtr);
+		}
+	}
+
+	internal void Show()
+	{
+		// The surface is already committed during Initialize().
+		// Trigger a render to show content.
 		_renderEvent.Set();
 	}
+
+	internal void UpdateSizeFromWrapper(int width, int height)
+	{
+		_width = width;
+		_height = height;
+		_renderEvent.Set();
+	}
+
+	private void RenderLoop()
+	{
+		var stopwatch = Stopwatch.StartNew();
+		var targetInterval = 1000.0 / WaylandApplicationHost.RenderFrameRate;
+
+		while (_renderLoopRunning && !_closedTcs.Task.IsCompleted)
+		{
+			_renderEvent.WaitOne(TimeSpan.FromMilliseconds(targetInterval));
+
+			if (!_renderLoopRunning || _closedTcs.Task.IsCompleted)
+			{
+				break;
+			}
+
+			// Dispatch pending Wayland events
+			_ = WaylandBindings.wl_display_dispatch_pending(_wlDisplay);
+			_ = WaylandBindings.wl_display_flush(_wlDisplay);
+
+			var frameStart = stopwatch.Elapsed.TotalMilliseconds;
+
+			try
+			{
+				_renderer?.Render();
+			}
+			catch (Exception ex)
+			{
+				if (this.Log().IsEnabled(LogLevel.Error))
+				{
+					this.Log().Error($"Render error: {ex.Message}");
+				}
+			}
+
+			var elapsed = stopwatch.Elapsed.TotalMilliseconds - frameStart;
+			var remaining = targetInterval - elapsed;
+			if (remaining > 1)
+			{
+				Thread.Sleep((int)remaining);
+			}
+		}
+	}
+
+	// --- Wayland event callbacks ---
+
+	private void OnRegistryGlobal(IntPtr data, IntPtr registry, uint name, string iface, uint version)
+	{
+		if (this.Log().IsEnabled(LogLevel.Debug))
+		{
+			this.Log().Debug($"Registry global: {iface} v{version} name={name}");
+		}
+
+		switch (iface)
+		{
+			case "wl_compositor":
+				_wlCompositor = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.wl_compositor_interface, Math.Min(version, 6u));
+				break;
+			case "wl_shm":
+				_wlShm = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.wl_shm_interface, Math.Min(version, 1u));
+				break;
+			case "wl_seat":
+				_wlSeat = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.wl_seat_interface, Math.Min(version, 5u));
+				break;
+			case "xdg_wm_base":
+				// xdg_wm_base is NOT in libwayland-client, so we pass IntPtr.Zero and let Wayland handle it
+				_xdgWmBase = WaylandBindings.wl_registry_bind(registry, name, IntPtr.Zero, Math.Min(version, 4u));
+				// Set up xdg_wm_base listener (for ping)
+				_xdgWmBasePingDelegate = OnXdgWmBasePing;
+				var wmBaseListener = new XdgWmBaseListener
+				{
+					ping = Marshal.GetFunctionPointerForDelegate(_xdgWmBasePingDelegate),
+				};
+				_xdgWmBaseListenerHandle = GCHandle.Alloc(wmBaseListener, GCHandleType.Pinned);
+				_ = WaylandBindings.wl_proxy_add_listener(_xdgWmBase, _xdgWmBaseListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
+				break;
+		}
+	}
+
+	private void OnRegistryGlobalRemove(IntPtr data, IntPtr registry, uint name)
+	{
+		// Globals can be removed (e.g., output disconnected). No-op for now.
+	}
+
+	private void OnXdgWmBasePing(IntPtr data, IntPtr xdgWmBase, uint serial)
+	{
+		// Must pong to keep the connection alive
+		// xdg_wm_base.pong opcode = 3
+		WaylandBindings.wl_proxy_marshal_flags(
+			xdgWmBase, XdgShell.XDG_WM_BASE_PONG, IntPtr.Zero,
+			WaylandBindings.wl_proxy_get_version(xdgWmBase), 0, serial);
+	}
+
+	private void OnXdgSurfaceConfigure(IntPtr data, IntPtr xdgSurface, uint serial)
+	{
+		// Acknowledge the configure
+		// xdg_surface.ack_configure opcode = 4
+		WaylandBindings.wl_proxy_marshal_flags(
+			xdgSurface, XdgShell.XDG_SURFACE_ACK_CONFIGURE, IntPtr.Zero,
+			WaylandBindings.wl_proxy_get_version(xdgSurface), 0, serial);
+
+		_configured = true;
+
+		// Commit after ack
+		WaylandBindings.wl_proxy_marshal_flags(
+			_wlSurface, 6, IntPtr.Zero, WaylandBindings.wl_proxy_get_version(_wlSurface), 0);
+
+		_renderEvent.Set();
+	}
+
+	private void OnXdgToplevelConfigure(IntPtr data, IntPtr toplevel, int width, int height, IntPtr states)
+	{
+		if (width > 0 && height > 0)
+		{
+			_width = width;
+			_height = height;
+		}
+		// The actual ack happens in OnXdgSurfaceConfigure
+	}
+
+	private void OnXdgToplevelClose(IntPtr data, IntPtr toplevel)
+	{
+		_renderLoopRunning = false;
+		Close();
+	}
+
+	// --- Static helpers ---
 
 	internal static WaylandXamlRootHost? GetHostFromWindow(Window window)
 		=> _windowToHost.TryGetValue(window, out var host) ? host : null;
 
 	internal static void CloseAllWindows()
 	{
-		foreach (var (window, host) in _windowToHost)
+		foreach (var (_, host) in _windowToHost)
 		{
+			host._renderLoopRunning = false;
 			host.Close();
 		}
 	}
@@ -59,18 +381,46 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 
 	internal void Close()
 	{
+		_renderLoopRunning = false;
+
 		if (_windowToHost.TryRemove(_window, out _))
 		{
+			// Destroy Wayland objects in reverse order
+			if (_xdgToplevel != IntPtr.Zero)
+			{
+				WaylandBindings.wl_proxy_destroy(_xdgToplevel);
+			}
+			if (_xdgSurface != IntPtr.Zero)
+			{
+				WaylandBindings.wl_proxy_destroy(_xdgSurface);
+			}
+			if (_wlSurface != IntPtr.Zero)
+			{
+				WaylandBindings.wl_proxy_destroy(_wlSurface);
+			}
+
+			_renderer?.Dispose();
+
+			if (_wlDisplay != IntPtr.Zero)
+			{
+				WaylandBindings.wl_display_disconnect(_wlDisplay);
+			}
+
+			// Free pinned handles
+			if (_registryListenerHandle.IsAllocated) { _registryListenerHandle.Free(); }
+			if (_xdgWmBaseListenerHandle.IsAllocated) { _xdgWmBaseListenerHandle.Free(); }
+			if (_xdgSurfaceListenerHandle.IsAllocated) { _xdgSurfaceListenerHandle.Free(); }
+			if (_xdgToplevelListenerHandle.IsAllocated) { _xdgToplevelListenerHandle.Free(); }
+
 			_closedTcs.TrySetResult();
 		}
 	}
 
+	// --- Input source management ---
+
 	internal void SetPointerSource(WaylandPointerInputSource source) => _pointerSource = source;
-
 	internal void SetKeyboardSource(WaylandKeyboardInputSource source) => _keyboardSource = source;
-
 	internal WaylandPointerInputSource? PointerSource => _pointerSource;
-
 	internal WaylandKeyboardInputSource? KeyboardSource => _keyboardSource;
 
 	public static void QueueAction(IXamlRootHost host, Action action)

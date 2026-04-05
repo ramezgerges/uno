@@ -10,12 +10,19 @@ namespace Uno.WinUI.Runtime.Skia.Wayland;
 internal class WaylandWindowWrapper : NativeWindowWrapperBase
 {
 	private readonly WaylandXamlRootHost _host;
+	private readonly XamlRoot _xamlRoot;
 	private string _title = "";
 
 	internal WaylandWindowWrapper(Window window, XamlRoot xamlRoot)
 		: base(window, xamlRoot)
 	{
+		_xamlRoot = xamlRoot;
 		_host = new WaylandXamlRootHost(this, window, xamlRoot);
+
+		// Report initial size to the framework
+		UpdateSizeFromHost();
+
+		RasterizationScale = (float)XamlRoot.GetDisplayInformation(_xamlRoot).RawPixelsPerViewPixel;
 	}
 
 	public override string Title
@@ -28,7 +35,8 @@ internal class WaylandWindowWrapper : NativeWindowWrapperBase
 
 	protected override void ShowCore()
 	{
-		// Will be implemented when rendering is wired up
+		_host.Show();
+		UpdateSizeFromHost();
 	}
 
 	protected override void CloseCore()
@@ -48,7 +56,7 @@ internal class WaylandWindowWrapper : NativeWindowWrapperBase
 
 	public override void Resize(SizeInt32 size)
 	{
-		// Will be implemented with rendering
+		_host.UpdateSizeFromWrapper(size.Width, size.Height);
 	}
 
 	public override void ExtendContentIntoTitleBar(bool extend)
@@ -56,9 +64,25 @@ internal class WaylandWindowWrapper : NativeWindowWrapperBase
 		// Will be implemented with decorations
 	}
 
+	internal void UpdateSizeFromHost()
+	{
+		var w = _host.Width;
+		var h = _host.Height;
+		var fullSize = new SizeInt32 { Width = w, Height = h };
+		SetSizes(fullSize, fullSize);
+
+		var scale = _xamlRoot.RasterizationScale;
+		if (scale <= 0)
+		{
+			scale = 1;
+		}
+		var windowSize = new Size(w / scale, h / scale);
+		var bounds = new Rect(default, windowSize);
+		SetBoundsAndVisibleBounds(bounds, bounds);
+	}
+
 	protected override IDisposable ApplyFullScreenPresenter()
 	{
-		// Will be implemented with xdg_toplevel.set_fullscreen
 		return new FullScreenDisposable();
 	}
 

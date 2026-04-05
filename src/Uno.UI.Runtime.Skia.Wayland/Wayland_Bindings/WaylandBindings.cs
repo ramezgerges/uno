@@ -67,13 +67,25 @@ internal static partial class WaylandBindings
 	[LibraryImport(LibWaylandClient, EntryPoint = "wl_proxy_get_id")]
 	internal static partial uint wl_proxy_get_id(IntPtr proxy);
 
-	// wl_display_get_registry is a convenience wrapper
-	[LibraryImport(LibWaylandClient, EntryPoint = "wl_display_get_registry")]
-	internal static partial IntPtr wl_display_get_registry(IntPtr display);
+	// wl_display_get_registry: inline function in C header.
+	// Implemented as: wl_proxy_marshal_flags(display, WL_DISPLAY_GET_REGISTRY=1, &wl_registry_interface, version, 0)
+	internal static IntPtr wl_display_get_registry(IntPtr display)
+	{
+		var iface = WaylandInterfaces.wl_registry_interface;
+		return wl_proxy_marshal_flags(display, 1, iface, wl_proxy_get_version(display), 0, IntPtr.Zero);
+	}
 
-	// wl_registry_bind
-	[LibraryImport(LibWaylandClient, EntryPoint = "wl_registry_bind")]
-	internal static partial IntPtr wl_registry_bind(IntPtr registry, uint name, IntPtr iface, uint version);
+	// wl_registry_bind: inline function in C header.
+	// Implemented as: wl_proxy_marshal_flags(registry, WL_REGISTRY_BIND=0, interface, version, 0, name, interface->name, version)
+	// But the actual C implementation is special — it uses wl_proxy_marshal_constructor_versioned
+	[LibraryImport(LibWaylandClient, EntryPoint = "wl_proxy_marshal_constructor_versioned")]
+	private static partial IntPtr wl_proxy_marshal_constructor_versioned(
+		IntPtr proxy, uint opcode, IntPtr iface, uint version, uint name, IntPtr ifaceName, uint ifaceVersion);
+
+	internal static IntPtr wl_registry_bind(IntPtr registry, uint name, IntPtr iface, uint version)
+	{
+		return wl_proxy_marshal_constructor_versioned(registry, 0, iface, version, name, iface, version);
+	}
 
 	// Shared memory
 	[LibraryImport("libc", EntryPoint = "mmap")]
