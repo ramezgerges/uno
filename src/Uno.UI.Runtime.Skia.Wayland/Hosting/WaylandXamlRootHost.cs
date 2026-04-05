@@ -56,6 +56,8 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	private XdgSurfaceConfigureDelegate? _xdgSurfaceConfigureDelegate;
 	private XdgToplevelConfigureDelegate? _xdgToplevelConfigureDelegate;
 	private XdgToplevelCloseDelegate? _xdgToplevelCloseDelegate;
+	private XdgToplevelConfigureBoundsDelegate? _xdgToplevelConfigureBoundsDelegate;
+	private XdgToplevelWmCapabilitiesDelegate? _xdgToplevelWmCapabilitiesDelegate;
 
 	// Pinned listener structs
 	private GCHandle _registryListenerHandle;
@@ -175,12 +177,14 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 		// Set up xdg_toplevel listener
 		_xdgToplevelConfigureDelegate = OnXdgToplevelConfigure;
 		_xdgToplevelCloseDelegate = OnXdgToplevelClose;
+		_xdgToplevelConfigureBoundsDelegate = OnXdgToplevelConfigureBounds;
+		_xdgToplevelWmCapabilitiesDelegate = OnXdgToplevelWmCapabilities;
 		var xdgToplevelListener = new XdgToplevelListener
 		{
 			configure = Marshal.GetFunctionPointerForDelegate(_xdgToplevelConfigureDelegate),
 			close = Marshal.GetFunctionPointerForDelegate(_xdgToplevelCloseDelegate),
-			configure_bounds = IntPtr.Zero,
-			wm_capabilities = IntPtr.Zero,
+			configure_bounds = Marshal.GetFunctionPointerForDelegate(_xdgToplevelConfigureBoundsDelegate),
+			wm_capabilities = Marshal.GetFunctionPointerForDelegate(_xdgToplevelWmCapabilitiesDelegate),
 		};
 		_xdgToplevelListenerHandle = GCHandle.Alloc(xdgToplevelListener, GCHandleType.Pinned);
 		_ = WaylandBindings.wl_proxy_add_listener(_xdgToplevel, _xdgToplevelListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
@@ -353,6 +357,16 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 			_height = height;
 		}
 		// The actual ack happens in OnXdgSurfaceConfigure
+	}
+
+	private void OnXdgToplevelConfigureBounds(IntPtr data, IntPtr toplevel, int width, int height)
+	{
+		// Compositor suggests maximum bounds — informational, no action needed
+	}
+
+	private void OnXdgToplevelWmCapabilities(IntPtr data, IntPtr toplevel, IntPtr capabilities)
+	{
+		// Compositor advertises which operations it supports — informational
 	}
 
 	private void OnXdgToplevelClose(IntPtr data, IntPtr toplevel)

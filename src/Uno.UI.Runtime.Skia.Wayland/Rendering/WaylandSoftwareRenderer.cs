@@ -68,11 +68,11 @@ internal class WaylandSoftwareRenderer : WaylandRenderer
 		// Create wl_shm_pool and wl_buffer
 		// wl_shm.create_pool opcode = 0, args: new_id (pool), fd, size
 		var pool = WaylandBindings.wl_proxy_marshal_flags(
-			_wlShm, 0, IntPtr.Zero, WaylandBindings.wl_proxy_get_version(_wlShm), 0, IntPtr.Zero, fd, (int)_bufferSize);
+			_wlShm, 0, WaylandInterfaces.wl_shm_pool_interface, WaylandBindings.wl_proxy_get_version(_wlShm), 0, IntPtr.Zero, fd, (int)_bufferSize);
 
 		// wl_shm_pool.create_buffer opcode = 0, args: new_id (buffer), offset, width, height, stride, format
 		_buffer = WaylandBindings.wl_proxy_marshal_flags(
-			pool, 0, IntPtr.Zero, WaylandBindings.wl_proxy_get_version(pool), 0,
+			pool, 0, WaylandInterfaces.wl_buffer_interface, WaylandBindings.wl_proxy_get_version(pool), 0,
 			IntPtr.Zero, 0, width, height, _stride, (int)WlShmFormat.ARGB8888);
 
 		// wl_shm_pool.destroy opcode = 1
