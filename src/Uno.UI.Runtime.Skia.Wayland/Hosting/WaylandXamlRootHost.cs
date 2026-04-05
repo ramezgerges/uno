@@ -11,7 +11,7 @@ namespace Uno.WinUI.Runtime.Skia.Wayland;
 internal partial class WaylandXamlRootHost : IXamlRootHost
 {
 	private static readonly ConcurrentDictionary<Window, WaylandXamlRootHost> _windowToHost = new();
-	private static int _hostCount;
+	private static bool _firstWindowCreated;
 
 	private readonly Window _window;
 	private readonly WaylandWindowWrapper _wrapper;
@@ -26,7 +26,7 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 		_wrapper = wrapper;
 		_window = window;
 		_windowToHost[window] = this;
-		Interlocked.Increment(ref _hostCount);
+		_firstWindowCreated = true;
 	}
 
 	public Task Closed => _closedTcs.Task;
@@ -55,13 +55,12 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	}
 
 	internal static bool AllWindowsDone()
-		=> _hostCount <= 0;
+		=> _firstWindowCreated && _windowToHost.IsEmpty;
 
 	internal void Close()
 	{
 		if (_windowToHost.TryRemove(_window, out _))
 		{
-			Interlocked.Decrement(ref _hostCount);
 			_closedTcs.TrySetResult();
 		}
 	}
