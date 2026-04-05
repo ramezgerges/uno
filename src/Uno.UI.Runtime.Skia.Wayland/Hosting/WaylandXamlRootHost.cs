@@ -154,7 +154,7 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 		// Create xdg_surface
 		// xdg_wm_base.get_xdg_surface opcode = 2, args: new_id, surface
 		_xdgSurface = WaylandBindings.wl_proxy_marshal_flags(
-			_xdgWmBase, XdgShell.XDG_WM_BASE_GET_XDG_SURFACE, IntPtr.Zero,
+			_xdgWmBase, XdgShell.XDG_WM_BASE_GET_XDG_SURFACE, WaylandInterfaces.xdg_surface_interface,
 			WaylandBindings.wl_proxy_get_version(_xdgWmBase), 0, IntPtr.Zero, _wlSurface);
 
 		// Set up xdg_surface listener
@@ -169,7 +169,7 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 		// Create xdg_toplevel
 		// xdg_surface.get_toplevel opcode = 1
 		_xdgToplevel = WaylandBindings.wl_proxy_marshal_flags(
-			_xdgSurface, XdgShell.XDG_SURFACE_GET_TOPLEVEL, IntPtr.Zero,
+			_xdgSurface, XdgShell.XDG_SURFACE_GET_TOPLEVEL, WaylandInterfaces.xdg_toplevel_interface,
 			WaylandBindings.wl_proxy_get_version(_xdgSurface), 0, IntPtr.Zero);
 
 		// Set up xdg_toplevel listener
@@ -301,8 +301,7 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 				_wlSeat = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.wl_seat_interface, Math.Min(version, 5u));
 				break;
 			case "xdg_wm_base":
-				// xdg_wm_base is NOT in libwayland-client, so we use the name-based bind
-				_xdgWmBase = WaylandBindings.wl_registry_bind_with_name(registry, name, "xdg_wm_base", Math.Min(version, 4u));
+				_xdgWmBase = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.xdg_wm_base_interface, Math.Min(version, 4u));
 				// Set up xdg_wm_base listener (for ping)
 				_xdgWmBasePingDelegate = OnXdgWmBasePing;
 				var wmBaseListener = new XdgWmBaseListener

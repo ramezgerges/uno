@@ -30,6 +30,14 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<Content Include="runtimes\linux-x64\native\libxdg-shell-protocol.so">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<Pack>true</Pack>
+			<PackagePath>runtimes/linux-x64/native</PackagePath>
+		</Content>
+	</ItemGroup>
+
+	<ItemGroup>
 		<ProjectReference Include="..\Uno.UI.Runtime.Skia\Uno.UI.Runtime.Skia.csproj" />
 		<ProjectReference Include="..\Uno.Foundation\Uno.Foundation.Skia.csproj" TreatAsPackageReference="false" PrivateAssets="all" />
 		<ProjectReference Include="..\Uno.UI\Uno.UI.Skia.csproj" />

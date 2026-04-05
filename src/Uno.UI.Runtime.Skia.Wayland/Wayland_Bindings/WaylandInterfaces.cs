@@ -4,61 +4,141 @@ using System.Runtime.InteropServices;
 namespace Uno.WinUI.Runtime.Skia.Wayland;
 
 /// <summary>
-/// Provides access to exported wl_*_interface global data symbols from libwayland-client.so.0.
-/// We piggyback on LibraryImport's resolution by defining a dummy P/Invoke function
-/// and using NativeLibrary.GetMainProgramHandle + dlsym to find the data symbols
-/// after the library has been loaded by the runtime.
+/// Provides access to exported wl_*_interface global data symbols.
+/// Core protocol interfaces come from libwayland-client.so.0.
+/// Extension protocol interfaces (xdg-shell) come from libxdg-shell-protocol.so
+/// which is compiled from wayland-scanner output and shipped as a native asset.
 /// </summary>
-internal static partial class WaylandInterfaces
+internal static class WaylandInterfaces
 {
-	// This dummy P/Invoke ensures libwayland-client.so.0 is loaded by the .NET runtime
-	// before we try to find data symbols in it.
-	[LibraryImport("libwayland-client.so.0", EntryPoint = "wl_display_connect")]
-	private static partial IntPtr _dummy_load(IntPtr name);
-
-	// dlsym from libc - we use RTLD_DEFAULT (IntPtr.Zero) to search ALL loaded libraries
-	[LibraryImport("libwayland-client.so.0", EntryPoint = "wl_proxy_get_version")]
-	private static partial uint _dummy_version(IntPtr proxy);
+	private static IntPtr _waylandClientHandle;
+	private static IntPtr _xdgShellHandle;
 
 	static WaylandInterfaces()
 	{
-		// The P/Invoke declarations above ensure the .NET runtime knows about libwayland-client.so.0.
-		// NativeLibrary.TryLoad with the assembly context will resolve it using the same DllImport resolution.
+		// Empty — lazy init in EnsureLoaded()
 	}
 
-	private static IntPtr GetInterface(string name)
+	private static bool _initialized;
+
+	internal static void EnsureLoaded()
 	{
-		// After the library is loaded via P/Invoke, get a handle to it
-		if (!NativeLibrary.TryLoad("libwayland-client.so.0", typeof(WaylandInterfaces).Assembly, null, out var handle) || handle == IntPtr.Zero)
+		if (_initialized)
 		{
-			throw new DllNotFoundException("libwayland-client.so.0 could not be loaded for symbol resolution");
+			return;
+		}
+		_initialized = true;
+
+		// Get a handle — try multiple approaches
+		NativeLibrary.TryLoad("libwayland-client.so.0", out _waylandClientHandle);
+		if (_waylandClientHandle == IntPtr.Zero)
+		{
+			NativeLibrary.TryLoad("/usr/lib/x86_64-linux-gnu/libwayland-client.so.0.22.0", out _waylandClientHandle);
+		}
+		if (_waylandClientHandle == IntPtr.Zero)
+		{
+			NativeLibrary.TryLoad("/lib/x86_64-linux-gnu/libwayland-client.so.0.22.0", out _waylandClientHandle);
+		}
+		if (_waylandClientHandle == IntPtr.Zero)
+		{
+			_waylandClientHandle = FindLoadedLibrary("libwayland-client.so");
 		}
 
+		// Load xdg-shell protocol library from the app's native assets
+		var appDir = AppContext.BaseDirectory;
+		foreach (var candidate in new[]
+		{
+			System.IO.Path.Combine(appDir, "runtimes", "linux-x64", "native", "libxdg-shell-protocol.so"),
+			System.IO.Path.Combine(appDir, "libxdg-shell-protocol.so"),
+		})
+		{
+			if (System.IO.File.Exists(candidate) && NativeLibrary.TryLoad(candidate, out _xdgShellHandle) && _xdgShellHandle != IntPtr.Zero)
+			{
+				break;
+			}
+		}
+	}
+
+	private static IntPtr FindLoadedLibrary(string name)
+	{
+		// Parse /proc/self/maps to find already-loaded libraries
+		try
+		{
+			foreach (var line in System.IO.File.ReadLines("/proc/self/maps"))
+			{
+				if (line.Contains(name) && line.Contains(".so"))
+				{
+					// Extract the path from the maps line
+					var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+					if (parts.Length >= 6)
+					{
+						var path = parts[^1];
+						if (System.IO.File.Exists(path) && NativeLibrary.TryLoad(path, out var handle))
+						{
+							return handle;
+						}
+					}
+				}
+			}
+		}
+		catch
+		{
+			// /proc may not be available
+		}
+		return IntPtr.Zero;
+	}
+
+	private static IntPtr GetExport(IntPtr handle, string name, string libName)
+	{
+		if (handle == IntPtr.Zero)
+		{
+			throw new DllNotFoundException($"{libName} not loaded — cannot resolve '{name}'");
+		}
 		if (!NativeLibrary.TryGetExport(handle, name, out var ptr) || ptr == IntPtr.Zero)
 		{
-			throw new EntryPointNotFoundException($"Wayland data symbol '{name}' not found in libwayland-client.so.0");
+			throw new EntryPointNotFoundException($"Symbol '{name}' not found in {libName} (handle={handle})");
 		}
 		return ptr;
 	}
 
-	// Core protocol interfaces
-	internal static readonly IntPtr wl_registry_interface = GetInterface("wl_registry_interface");
-	internal static readonly IntPtr wl_compositor_interface = GetInterface("wl_compositor_interface");
-	internal static readonly IntPtr wl_shm_interface = GetInterface("wl_shm_interface");
-	internal static readonly IntPtr wl_shm_pool_interface = GetInterface("wl_shm_pool_interface");
-	internal static readonly IntPtr wl_buffer_interface = GetInterface("wl_buffer_interface");
-	internal static readonly IntPtr wl_surface_interface = GetInterface("wl_surface_interface");
-	internal static readonly IntPtr wl_seat_interface = GetInterface("wl_seat_interface");
-	internal static readonly IntPtr wl_pointer_interface = GetInterface("wl_pointer_interface");
-	internal static readonly IntPtr wl_keyboard_interface = GetInterface("wl_keyboard_interface");
-	internal static readonly IntPtr wl_touch_interface = GetInterface("wl_touch_interface");
-	internal static readonly IntPtr wl_output_interface = GetInterface("wl_output_interface");
-	internal static readonly IntPtr wl_callback_interface = GetInterface("wl_callback_interface");
-	internal static readonly IntPtr wl_region_interface = GetInterface("wl_region_interface");
-	internal static readonly IntPtr wl_data_device_interface = GetInterface("wl_data_device_interface");
-	internal static readonly IntPtr wl_data_device_manager_interface = GetInterface("wl_data_device_manager_interface");
-	internal static readonly IntPtr wl_data_offer_interface = GetInterface("wl_data_offer_interface");
-	internal static readonly IntPtr wl_data_source_interface = GetInterface("wl_data_source_interface");
-	internal static readonly IntPtr wl_subcompositor_interface = GetInterface("wl_subcompositor_interface");
-	internal static readonly IntPtr wl_subsurface_interface = GetInterface("wl_subsurface_interface");
+	private static IntPtr GetCoreInterface(string name)
+	{
+		EnsureLoaded();
+		return GetExport(_waylandClientHandle, name, "libwayland-client.so.0");
+	}
+
+	private static IntPtr GetXdgInterface(string name)
+	{
+		EnsureLoaded();
+		return GetExport(_xdgShellHandle, name, "libxdg-shell-protocol.so");
+	}
+
+	// Core protocol interfaces (from libwayland-client.so.0)
+	// These are resolved lazily on first access via GetCoreInterface
+	internal static IntPtr wl_registry_interface => GetCoreInterface("wl_registry_interface");
+	internal static IntPtr wl_compositor_interface => GetCoreInterface("wl_compositor_interface");
+	internal static IntPtr wl_shm_interface => GetCoreInterface("wl_shm_interface");
+	internal static IntPtr wl_shm_pool_interface => GetCoreInterface("wl_shm_pool_interface");
+	internal static IntPtr wl_buffer_interface => GetCoreInterface("wl_buffer_interface");
+	internal static IntPtr wl_surface_interface => GetCoreInterface("wl_surface_interface");
+	internal static IntPtr wl_seat_interface => GetCoreInterface("wl_seat_interface");
+	internal static IntPtr wl_pointer_interface => GetCoreInterface("wl_pointer_interface");
+	internal static IntPtr wl_keyboard_interface => GetCoreInterface("wl_keyboard_interface");
+	internal static IntPtr wl_touch_interface => GetCoreInterface("wl_touch_interface");
+	internal static IntPtr wl_output_interface => GetCoreInterface("wl_output_interface");
+	internal static IntPtr wl_callback_interface => GetCoreInterface("wl_callback_interface");
+	internal static IntPtr wl_region_interface => GetCoreInterface("wl_region_interface");
+	internal static IntPtr wl_data_device_interface => GetCoreInterface("wl_data_device_interface");
+	internal static IntPtr wl_data_device_manager_interface => GetCoreInterface("wl_data_device_manager_interface");
+	internal static IntPtr wl_data_offer_interface => GetCoreInterface("wl_data_offer_interface");
+	internal static IntPtr wl_data_source_interface => GetCoreInterface("wl_data_source_interface");
+	internal static IntPtr wl_subcompositor_interface => GetCoreInterface("wl_subcompositor_interface");
+	internal static IntPtr wl_subsurface_interface => GetCoreInterface("wl_subsurface_interface");
+
+	// XDG shell interfaces (from libxdg-shell-protocol.so — generated by wayland-scanner)
+	internal static IntPtr xdg_wm_base_interface => GetXdgInterface("xdg_wm_base_interface");
+	internal static IntPtr xdg_positioner_interface => GetXdgInterface("xdg_positioner_interface");
+	internal static IntPtr xdg_surface_interface => GetXdgInterface("xdg_surface_interface");
+	internal static IntPtr xdg_toplevel_interface => GetXdgInterface("xdg_toplevel_interface");
+	internal static IntPtr xdg_popup_interface => GetXdgInterface("xdg_popup_interface");
 }
