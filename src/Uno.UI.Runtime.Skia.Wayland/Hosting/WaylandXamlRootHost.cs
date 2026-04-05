@@ -301,8 +301,8 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 				_wlSeat = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.wl_seat_interface, Math.Min(version, 5u));
 				break;
 			case "xdg_wm_base":
-				// xdg_wm_base is NOT in libwayland-client, so we pass IntPtr.Zero and let Wayland handle it
-				_xdgWmBase = WaylandBindings.wl_registry_bind(registry, name, IntPtr.Zero, Math.Min(version, 4u));
+				// xdg_wm_base is NOT in libwayland-client, so we use the name-based bind
+				_xdgWmBase = WaylandBindings.wl_registry_bind_with_name(registry, name, "xdg_wm_base", Math.Min(version, 4u));
 				// Set up xdg_wm_base listener (for ping)
 				_xdgWmBasePingDelegate = OnXdgWmBasePing;
 				var wmBaseListener = new XdgWmBaseListener

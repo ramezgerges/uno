@@ -82,9 +82,37 @@ internal static partial class WaylandBindings
 	private static partial IntPtr wl_proxy_marshal_constructor_versioned(
 		IntPtr proxy, uint opcode, IntPtr iface, uint version, uint name, IntPtr ifaceName, uint ifaceVersion);
 
-	internal static IntPtr wl_registry_bind(IntPtr registry, uint name, IntPtr iface, uint version)
+	internal static unsafe IntPtr wl_registry_bind(IntPtr registry, uint name, IntPtr iface, uint version)
 	{
-		return wl_proxy_marshal_constructor_versioned(registry, 0, iface, version, name, iface, version);
+		IntPtr ifaceName;
+		if (iface == IntPtr.Zero)
+		{
+			// For extension protocols, we must still provide the interface name as a string.
+			// This should not happen — callers should provide valid interface pointers.
+			throw new ArgumentException("wl_registry_bind requires a non-null wl_interface pointer");
+		}
+
+		// The wl_interface struct starts with: const char* name;
+		// We need to read interface->name (dereference the first pointer in the struct)
+		ifaceName = *(IntPtr*)iface.ToPointer();
+		return wl_proxy_marshal_constructor_versioned(registry, 0, iface, version, name, ifaceName, version);
+	}
+
+	/// <summary>
+	/// Bind a registry global using a manually-specified interface name (for extension protocols
+	/// whose wl_interface is not in libwayland-client).
+	/// </summary>
+	internal static IntPtr wl_registry_bind_with_name(IntPtr registry, uint name, string interfaceName, uint version)
+	{
+		var namePtr = Marshal.StringToHGlobalAnsi(interfaceName);
+		try
+		{
+			return wl_proxy_marshal_constructor_versioned(registry, 0, IntPtr.Zero, version, name, namePtr, version);
+		}
+		finally
+		{
+			Marshal.FreeHGlobal(namePtr);
+		}
 	}
 
 	// Shared memory
