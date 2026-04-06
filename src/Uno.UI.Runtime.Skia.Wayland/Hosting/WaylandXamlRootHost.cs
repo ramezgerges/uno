@@ -36,6 +36,7 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	private IntPtr _wlKeyboard;
 	private IntPtr _xdgWmBase;
 	private IntPtr _xdgDecorationManager;
+	private IntPtr _wlDataDeviceManager;
 	private IntPtr _cursorShapeManager;
 	private IntPtr _cursorShapeDevice;
 	private IntPtr _cursorTheme;
@@ -216,6 +217,9 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 					WaylandBindings.wl_proxy_get_version(_wlCompositor), 0, IntPtr.Zero);
 			}
 		}
+
+		// Initialize clipboard
+		WaylandClipboardExtension.Instance.Initialize(_wlDisplay, _wlDataDeviceManager, _wlSeat);
 
 		// Create surface
 		// wl_compositor.create_surface opcode = 0
@@ -457,6 +461,9 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 				break;
 			case "wl_shm":
 				_wlShm = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.wl_shm_interface, Math.Min(version, 1u));
+				break;
+			case "wl_data_device_manager":
+				_wlDataDeviceManager = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.wl_data_device_manager_interface, Math.Min(version, 3u));
 				break;
 			case "wl_seat":
 				_wlSeat = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.wl_seat_interface, Math.Min(version, 5u));

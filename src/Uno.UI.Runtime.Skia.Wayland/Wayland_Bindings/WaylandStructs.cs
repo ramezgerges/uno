@@ -249,10 +249,22 @@ internal delegate void WlDataSourceSendDelegate(IntPtr data, IntPtr source, stri
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 internal delegate void WlDataSourceCancelledDelegate(IntPtr data, IntPtr source);
 
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+internal delegate void WlDataSourceDndDropPerformedDelegate(IntPtr data, IntPtr source);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+internal delegate void WlDataSourceDndFinishedDelegate(IntPtr data, IntPtr source);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+internal delegate void WlDataSourceActionDelegate(IntPtr data, IntPtr source, uint dndAction);
+
 [StructLayout(LayoutKind.Sequential)]
 internal struct WlDataSourceListener
 {
-	public IntPtr target;
-	public IntPtr send;
-	public IntPtr cancelled;
+	public IntPtr target;              // v1
+	public IntPtr send;                // v1
+	public IntPtr cancelled;           // v1
+	public IntPtr dnd_drop_performed;  // v3
+	public IntPtr dnd_finished;        // v3
+	public IntPtr action;              // v3
 }
