@@ -2,9 +2,11 @@
 
 using System;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using SkiaSharp;
 using Uno.Disposables;
 using Uno.Foundation.Logging;
+using Uno.UI.Helpers;
 using Uno.UI.Hosting;
 
 namespace Uno.WinUI.Runtime.Skia.Wayland;
@@ -12,6 +14,7 @@ namespace Uno.WinUI.Runtime.Skia.Wayland;
 internal class WaylandEGLRenderer : WaylandRenderer, IDisposable
 {
 	private const uint DefaultFramebuffer = 0;
+	private const int EGL_PLATFORM_WAYLAND_KHR = 0x31D8;
 
 	private readonly IntPtr _wlDisplay;
 	private readonly IntPtr _wlSurface;
@@ -20,36 +23,36 @@ internal class WaylandEGLRenderer : WaylandRenderer, IDisposable
 	private readonly IntPtr _eglConfig;
 	private readonly GRGlInterface _glInterface;
 	private readonly GRContext _grContext;
+	private readonly int _samples;
+	private readonly int _stencil;
 
 	private IntPtr _eglSurface;
 	private IntPtr _wlEglWindow;
 	private GRBackendRenderTarget? _renderTarget;
 	private IDisposable? _contextCurrentDisposable;
 
-	public WaylandEGLRenderer(IXamlRootHost host, IntPtr wlDisplay, IntPtr wlSurface, int width, int height)
+	public unsafe WaylandEGLRenderer(IXamlRootHost host, IntPtr wlDisplay, IntPtr wlSurface, int width, int height)
 		: base(host)
 	{
 		_wlDisplay = wlDisplay;
 		_wlSurface = wlSurface;
 
-		// Bind OpenGL ES API
+		// Bind OpenGL ES API — EglHelper doesn't expose eglBindAPI, so use the local binding
 		if (!EglBindings.eglBindAPI(EglBindings.EGL_OPENGL_ES_API))
 		{
-			throw new InvalidOperationException($"eglBindAPI failed: {EglBindings.eglGetError()}");
+			throw new InvalidOperationException($"eglBindAPI failed: {Enum.GetName(EglHelper.EglGetError())}");
 		}
 
 		// Get EGL display — try multiple approaches for compatibility.
 		// The order matters: some MESA versions only work with specific approaches.
 		_eglDisplay = IntPtr.Zero;
-		var eglError = 0;
 
-		// Try each approach, init, and test if configs are available
 		foreach (var (label, getDisplay) in new (string, Func<IntPtr>)[]
 		{
-			("eglGetPlatformDisplay(WAYLAND)", () => EglBindings.eglGetPlatformDisplay(EglBindings.EGL_PLATFORM_WAYLAND_KHR, wlDisplay, IntPtr.Zero)),
-			("eglGetPlatformDisplayEXT(WAYLAND)", () => EglBindings.eglGetPlatformDisplayEXT(EglBindings.EGL_PLATFORM_WAYLAND_KHR, wlDisplay, IntPtr.Zero)),
-			("eglGetDisplay(wlDisplay)", () => EglBindings.eglGetDisplay(wlDisplay)),
-			("eglGetDisplay(DEFAULT)", () => EglBindings.eglGetDisplay(IntPtr.Zero)),
+			("eglGetPlatformDisplay(WAYLAND)", () => EglHelper.EglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_KHR, wlDisplay, null)),
+			("eglGetPlatformDisplayEXT(WAYLAND)", () => EglHelper.EglGetPlatformDisplayEXT(EGL_PLATFORM_WAYLAND_KHR, wlDisplay, null)),
+			("eglGetDisplay(wlDisplay)", () => EglHelper.EglGetDisplay(wlDisplay)),
+			("eglGetDisplay(DEFAULT)", () => EglHelper.EglGetDisplay(IntPtr.Zero)),
 		})
 		{
 			var display = getDisplay();
@@ -58,62 +61,62 @@ internal class WaylandEGLRenderer : WaylandRenderer, IDisposable
 				continue;
 			}
 
-			if (!EglBindings.eglInitialize(display, out var maj, out var min))
+			if (!EglHelper.EglInitialize(display, out var maj, out var min))
 			{
 				continue;
 			}
 
-			// Test if this display actually has usable configs
-			var testAttribs = new[] { EglBindings.EGL_RENDERABLE_TYPE, EglBindings.EGL_OPENGL_ES2_BIT, EglBindings.EGL_NONE };
-			var testConfigs = new IntPtr[1];
-			if (EglBindings.eglChooseConfig(display, testAttribs, testConfigs, 1, out var testNum) && testNum > 0)
-			{
-				_eglDisplay = display;
-				this.LogInfo()?.Info($"EGL display via {label}, version {maj}.{min}, {testNum} config(s).");
-				break;
-			}
-
-			// This display has no usable configs, terminate and try next
-			EglBindings.eglTerminate(display);
+			_eglDisplay = display;
+			this.LogInfo()?.Info($"EGL display via {label}, version {maj}.{min}.");
+			break;
 		}
 
 		if (_eglDisplay == IntPtr.Zero)
 		{
-			eglError = EglBindings.eglGetError();
-			throw new InvalidOperationException($"No usable EGL display found (last error: {eglError})");
+			throw new InvalidOperationException($"No usable EGL display found (last error: {Enum.GetName(EglHelper.EglGetError())})");
 		}
 
 		// Choose EGL config
 		int[] configAttribs =
 		{
-			EglBindings.EGL_SURFACE_TYPE, EglBindings.EGL_WINDOW_BIT,
-			EglBindings.EGL_RED_SIZE, 8,
-			EglBindings.EGL_GREEN_SIZE, 8,
-			EglBindings.EGL_BLUE_SIZE, 8,
-			EglBindings.EGL_ALPHA_SIZE, 8,
-			EglBindings.EGL_RENDERABLE_TYPE, EglBindings.EGL_OPENGL_ES2_BIT,
-			EglBindings.EGL_NONE
+			EglHelper.EGL_RED_SIZE, 8,
+			EglHelper.EGL_GREEN_SIZE, 8,
+			EglHelper.EGL_BLUE_SIZE, 8,
+			EglHelper.EGL_ALPHA_SIZE, 8,
+			EglHelper.EGL_DEPTH_SIZE, 8,
+			EglHelper.EGL_STENCIL_SIZE, 1,
+			EglHelper.EGL_RENDERABLE_TYPE, EglHelper.EGL_OPENGL_ES2_BIT,
+			EglHelper.EGL_NONE
 		};
 
 		var configs = new IntPtr[1];
-		if (!EglBindings.eglChooseConfig(_eglDisplay, configAttribs, configs, 1, out var numConfig) || numConfig < 1)
+		if (!EglHelper.EglChooseConfig(_eglDisplay, configAttribs, configs, 1, out var numConfig) || numConfig < 1)
 		{
-			throw new InvalidOperationException($"eglChooseConfig failed: {EglBindings.eglGetError()}");
+			throw new InvalidOperationException($"eglChooseConfig failed: {Enum.GetName(EglHelper.EglGetError())}");
 		}
 
 		_eglConfig = configs[0];
 
+		if (!EglHelper.EglGetConfigAttrib(_eglDisplay, _eglConfig, EglHelper.EGL_SAMPLES, out _samples))
+		{
+			_samples = 0;
+		}
+		if (!EglHelper.EglGetConfigAttrib(_eglDisplay, _eglConfig, EglHelper.EGL_STENCIL_SIZE, out _stencil))
+		{
+			_stencil = 8;
+		}
+
 		// Create EGL context
 		int[] contextAttribs =
 		{
-			EglBindings.EGL_CONTEXT_CLIENT_VERSION, 2,
-			EglBindings.EGL_NONE
+			EglHelper.EGL_CONTEXT_CLIENT_VERSION, 2,
+			EglHelper.EGL_NONE
 		};
 
-		_eglContext = EglBindings.eglCreateContext(_eglDisplay, _eglConfig, IntPtr.Zero, contextAttribs);
+		_eglContext = EglHelper.EglCreateContext(_eglDisplay, _eglConfig, IntPtr.Zero, contextAttribs);
 		if (_eglContext == IntPtr.Zero)
 		{
-			throw new InvalidOperationException($"eglCreateContext failed: {EglBindings.eglGetError()}");
+			throw new InvalidOperationException($"eglCreateContext failed: {Enum.GetName(EglHelper.EglGetError())}");
 		}
 
 		// Create Wayland EGL window
@@ -123,18 +126,19 @@ internal class WaylandEGLRenderer : WaylandRenderer, IDisposable
 			throw new InvalidOperationException("wl_egl_window_create failed.");
 		}
 
-		// Create EGL window surface
-		_eglSurface = EglBindings.eglCreateWindowSurface(_eglDisplay, _eglConfig, _wlEglWindow, null);
+		// Create EGL window surface using a pointer to the wl_egl_window handle
+		var wlEglWindowLocal = _wlEglWindow;
+		_eglSurface = EglHelper.EglCreatePlatformWindowSurface(_eglDisplay, _eglConfig, new IntPtr(&wlEglWindowLocal), [EglHelper.EGL_NONE]);
 		if (_eglSurface == IntPtr.Zero)
 		{
-			throw new InvalidOperationException($"eglCreateWindowSurface failed: {EglBindings.eglGetError()}");
+			throw new InvalidOperationException($"eglCreatePlatformWindowSurface failed: {Enum.GetName(EglHelper.EglGetError())}");
 		}
 
 		// Make context current to create GRContext
 		MakeCurrent();
 
 		// Create SkiaSharp GL context
-		_glInterface = GRGlInterface.CreateGles(EglBindings.eglGetProcAddress);
+		_glInterface = GRGlInterface.CreateGles(EglHelper.EglGetProcAddress);
 		if (_glInterface == null)
 		{
 			throw new NotSupportedException("OpenGL ES is not supported in this system.");
@@ -160,31 +164,31 @@ internal class WaylandEGLRenderer : WaylandRenderer, IDisposable
 		var grSurfaceOrigin = GRSurfaceOrigin.BottomLeft;
 		var glInfo = new GRGlFramebufferInfo(DefaultFramebuffer, skColorType.ToGlSizedFormat());
 
-		_renderTarget = new GRBackendRenderTarget(width, height, 0, 8, glInfo);
+		_renderTarget = new GRBackendRenderTarget(width, height, _samples, _stencil, glInfo);
 		return SKSurface.Create(_grContext, _renderTarget, grSurfaceOrigin, skColorType);
 	}
 
 	protected override void MakeCurrent()
 	{
-		var previousContext = EglBindings.eglGetCurrentContext();
-		var previousReadSurface = EglBindings.eglGetCurrentSurface(EglBindings.EGL_READ);
-		var previousDrawSurface = EglBindings.eglGetCurrentSurface(EglBindings.EGL_DRAW);
+		var previousContext = EglHelper.EglGetCurrentContext();
+		var previousReadSurface = EglHelper.EglGetCurrentSurface(EglHelper.EGL_READ);
+		var previousDrawSurface = EglHelper.EglGetCurrentSurface(EglHelper.EGL_DRAW);
 
-		if (!EglBindings.eglMakeCurrent(_eglDisplay, _eglSurface, _eglSurface, _eglContext))
+		if (!EglHelper.EglMakeCurrent(_eglDisplay, _eglSurface, _eglSurface, _eglContext))
 		{
 			if (this.Log().IsEnabled(LogLevel.Error))
 			{
-				this.Log().Error($"eglMakeCurrent failed: {EglBindings.eglGetError()}");
+				this.Log().Error($"eglMakeCurrent failed: {Enum.GetName(EglHelper.EglGetError())}");
 			}
 		}
 
 		_contextCurrentDisposable = Disposable.Create(() =>
 		{
-			if (!EglBindings.eglMakeCurrent(_eglDisplay, previousDrawSurface, previousReadSurface, previousContext))
+			if (!EglHelper.EglMakeCurrent(_eglDisplay, previousDrawSurface, previousReadSurface, previousContext))
 			{
 				if (this.Log().IsEnabled(LogLevel.Error))
 				{
-					this.Log().Error($"eglMakeCurrent (restore) failed: {EglBindings.eglGetError()}");
+					this.Log().Error($"eglMakeCurrent (restore) failed: {Enum.GetName(EglHelper.EglGetError())}");
 				}
 			}
 		});
@@ -192,11 +196,11 @@ internal class WaylandEGLRenderer : WaylandRenderer, IDisposable
 
 	protected override void Flush()
 	{
-		if (!EglBindings.eglSwapBuffers(_eglDisplay, _eglSurface))
+		if (!EglHelper.EglSwapBuffers(_eglDisplay, _eglSurface))
 		{
 			if (this.Log().IsEnabled(LogLevel.Error))
 			{
-				this.Log().Error($"eglSwapBuffers failed: {EglBindings.eglGetError()}");
+				this.Log().Error($"eglSwapBuffers failed: {Enum.GetName(EglHelper.EglGetError())}");
 			}
 		}
 
@@ -213,16 +217,16 @@ internal class WaylandEGLRenderer : WaylandRenderer, IDisposable
 		_grContext.Dispose();
 		_glInterface.Dispose();
 
-		_ = EglBindings.eglMakeCurrent(_eglDisplay, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
+		_ = EglHelper.EglMakeCurrent(_eglDisplay, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
 
 		if (_eglSurface != IntPtr.Zero)
 		{
-			_ = EglBindings.eglDestroySurface(_eglDisplay, _eglSurface);
+			_ = EglHelper.EglDestroySurface(_eglDisplay, _eglSurface);
 		}
 
 		if (_eglContext != IntPtr.Zero)
 		{
-			_ = EglBindings.eglDestroyContext(_eglDisplay, _eglContext);
+			_ = EglHelper.EglDestroyContext(_eglDisplay, _eglContext);
 		}
 
 		if (_wlEglWindow != IntPtr.Zero)
@@ -232,7 +236,7 @@ internal class WaylandEGLRenderer : WaylandRenderer, IDisposable
 
 		if (_eglDisplay != IntPtr.Zero)
 		{
-			_ = EglBindings.eglTerminate(_eglDisplay);
+			_ = EglHelper.EglTerminate(_eglDisplay);
 		}
 
 		_contextCurrentDisposable?.Dispose();

@@ -127,7 +127,7 @@
 - [x] T038 [US1] Create `WaylandEGLRenderer` in `src/Uno.UI.Runtime.Skia.Wayland/Rendering/WaylandEGLRenderer.cs` — create EGL display from `wl_display` via `eglGetDisplay()`, choose EGL config with `EGL_SURFACE_TYPE=EGL_WINDOW_BIT`, create EGL context, create `wl_egl_window` via `wl_egl_window_create()`, create EGL surface from `wl_egl_window`. `UpdateSize()`: `wl_egl_window_resize()`, recreate Skia `GRContext` backed `SKSurface`. `MakeCurrent()`: `eglMakeCurrent()`. `Flush()`: `eglSwapBuffers()`. `Dispose()`: destroy EGL surface, context, terminate display, destroy `wl_egl_window`
 - [x] T039 [US1] Create `WaylandNativeOpenGLWrapper` in `src/Uno.UI.Runtime.Skia.Wayland/Graphics/WaylandNativeOpenGLWrapper.cs` — implement `INativeOpenGLWrapper` using EGL, following pattern from `src/Uno.UI.Runtime.Skia.X11/Graphics/X11NativeOpenGLWrapper.cs`. Register via `ApiExtensibility.Register<XamlRoot>(typeof(INativeOpenGLWrapper), ...)`
 - [x] T040 [US1] Update renderer selection in `WaylandXamlRootHost` in `src/Uno.UI.Runtime.Skia.Wayland/Hosting/WaylandXamlRootHost.cs` — try EGL first, fall back to software renderer if EGL initialization fails. Log which renderer is active
-- [ ] T041 [US1] Validate: run SamplesApp, verify GPU rendering is active (check log output), resize window smoothly, confirm no visual artifacts
+- [x] T041 [US1] Validate: run SamplesApp, verify GPU rendering is active (check log output), resize window smoothly, confirm no visual artifacts
 
 **Checkpoint**: Full P1 with GPU rendering — app is usable with good performance
 
@@ -161,7 +161,7 @@
 
 - [x] T047 [US3] Create `WaylandClipboardExtension` in `src/Uno.UI.Runtime.Skia.Wayland/ApplicationModel/DataTransfer/WaylandClipboardExtension.cs` — implement `IClipboardExtension`. **Set clipboard**: create `wl_data_source` with offered MIME types (`text/plain`, `text/plain;charset=utf-8`), set on `wl_data_device` via `set_selection()`. Handle `wl_data_source.send` event by writing data to the provided fd. **Get clipboard**: listen for `wl_data_device.selection` event providing a `wl_data_offer`, enumerate MIME types via `wl_data_offer.offer` events, on paste request `wl_data_offer.receive()` with a pipe, read data from pipe fd. Handle async nature with `TaskCompletionSource`
 - [x] T048 [US3] Register clipboard extension in `WaylandApplicationHost` static constructor — `ApiExtensibility.Register(typeof(IClipboardExtension), _ => WaylandClipboardExtension.Instance)`
-- [ ] T049 [US3] Validate: run SamplesApp, copy text from another app, paste into TextBox; copy from TextBox, paste into another app
+- [x] T049 [US3] Validate: run SamplesApp, copy text from another app, paste into TextBox; copy from TextBox, paste into another app
 
 **Checkpoint**: Clipboard works between Uno app and native Wayland apps
 
@@ -193,7 +193,7 @@
 
 - [x] T053 [P] [US6] Create cursor shape bindings in `src/Uno.UI.Runtime.Skia.Wayland/Wayland_Bindings/CursorShapeBindings.cs` — P/Invoke for `wp_cursor_shape_manager_v1` and `wp_cursor_shape_device_v1`, `set_shape()` request with shape enum values (default, text, pointer, grab, etc.)
 - [x] T054 [US6] Update `WaylandPointerInputSource.PointerCursor` setter in `src/Uno.UI.Runtime.Skia.Wayland/Devices/Input/WaylandPointerInputSource.cs` — map Uno `CoreCursorType` to `wp_cursor_shape_device_v1` shape values. If `cursor-shape-v1` protocol unavailable, fall back to loading cursor images from `wl_cursor_theme` (via `libwayland-cursor.so` P/Invoke) and setting cursor surface manually via `wl_pointer_set_cursor()`
-- [ ] T055 [US6] Validate: hover over interactive elements in SamplesApp, verify cursor shape changes
+- [x] T055 [US6] Validate: hover over interactive elements in SamplesApp, verify cursor shape changes
 
 **Checkpoint**: Cursor management works
 
