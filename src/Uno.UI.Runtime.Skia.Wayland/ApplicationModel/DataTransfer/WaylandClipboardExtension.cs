@@ -40,15 +40,28 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	public void StartContentChanged() { }
 	public void StopContentChanged() { }
 
-	internal void Initialize(IntPtr wlDisplay, IntPtr wlDataDeviceManager, IntPtr wlSeat)
+	private IntPtr _wlSeat;
+	private bool _initialized;
+
+	internal void SetWaylandObjects(IntPtr wlDisplay, IntPtr wlDataDeviceManager, IntPtr wlSeat)
 	{
 		_wlDisplay = wlDisplay;
 		_wlDataDeviceManager = wlDataDeviceManager;
+		_wlSeat = wlSeat;
+	}
 
-		if (wlDataDeviceManager == IntPtr.Zero || wlSeat == IntPtr.Zero)
+	private void EnsureInitialized()
+	{
+		if (_initialized || _wlDataDeviceManager == IntPtr.Zero || _wlSeat == IntPtr.Zero)
 		{
 			return;
 		}
+		_initialized = true;
+		Initialize();
+	}
+
+	private void Initialize()
+	{
 
 		// Create delegates ONCE
 		_ddDataOffer = OnDataOffer;
@@ -59,9 +72,9 @@ internal class WaylandClipboardExtension : IClipboardExtension
 
 		// Create data device: get_data_device opcode=1, args: new_id, seat
 		_wlDataDevice = WaylandBindings.wl_proxy_marshal_flags(
-			wlDataDeviceManager, 1, WaylandInterfaces.wl_data_device_interface,
-			WaylandBindings.wl_proxy_get_version(wlDataDeviceManager), 0,
-			IntPtr.Zero, wlSeat);
+			_wlDataDeviceManager, 1, WaylandInterfaces.wl_data_device_interface,
+			WaylandBindings.wl_proxy_get_version(_wlDataDeviceManager), 0,
+			IntPtr.Zero, _wlSeat);
 
 		if (_wlDataDevice == IntPtr.Zero)
 		{
@@ -112,6 +125,8 @@ internal class WaylandClipboardExtension : IClipboardExtension
 
 	public DataPackageView? GetContent()
 	{
+		EnsureInitialized();
+
 		if (_currentOffer != IntPtr.Zero)
 		{
 			string? mime = null;
@@ -147,6 +162,8 @@ internal class WaylandClipboardExtension : IClipboardExtension
 
 	public void SetContent(DataPackage? content)
 	{
+		EnsureInitialized();
+
 		if (content == null) { _copiedText = null; ContentChanged?.Invoke(this, EventArgs.Empty); return; }
 
 		try

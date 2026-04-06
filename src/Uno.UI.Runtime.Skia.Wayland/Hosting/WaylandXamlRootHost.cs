@@ -205,6 +205,9 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 			throw new InvalidOperationException("xdg_wm_base not found — compositor doesn't support xdg-shell");
 		}
 
+		// Pass Wayland objects to clipboard for lazy initialization
+		WaylandClipboardExtension.Instance.SetWaylandObjects(_wlDisplay, _wlDataDeviceManager, _wlSeat);
+
 		// Load cursor theme for wl_pointer.set_cursor fallback
 		if (_wlShm != IntPtr.Zero)
 		{
@@ -361,12 +364,6 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 
 	private unsafe void EventLoop()
 	{
-		// Init clipboard on the event thread (same thread that dispatches events)
-		if (_wlDataDeviceManager != IntPtr.Zero && _wlSeat != IntPtr.Zero)
-		{
-			WaylandClipboardExtension.Instance.Initialize(_wlDisplay, _wlDataDeviceManager, _wlSeat);
-		}
-
 		var fd = WaylandBindings.wl_display_get_fd(_wlDisplay);
 		var pollFd = new PollFd { fd = fd, events = WaylandBindings.POLLIN, revents = 0 };
 
