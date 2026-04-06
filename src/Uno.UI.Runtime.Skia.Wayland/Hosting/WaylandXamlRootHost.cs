@@ -731,6 +731,7 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 
 	private void OnPointerEnter(IntPtr data, IntPtr pointer, uint serial, IntPtr surface, int sx, int sy)
 	{
+		WaylandClipboardExtension.Instance.SetLastSerial(serial);
 		// Wayland sends fixed-point 24.8 coordinates for enter
 		_pointerSource?.ProcessPointerEnter(serial, sx / 256.0, sy / 256.0);
 	}
@@ -748,6 +749,7 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 
 	private void OnPointerButton(IntPtr data, IntPtr pointer, uint serial, uint time, uint button, uint state)
 	{
+		WaylandClipboardExtension.Instance.SetLastSerial(serial);
 		_pointerSource?.ProcessPointerButton(serial, time, button, state);
 	}
 
@@ -783,6 +785,7 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 
 	private void OnKeyboardKey(IntPtr data, IntPtr keyboard, uint serial, uint time, uint key, uint state)
 	{
+		WaylandClipboardExtension.Instance.SetLastSerial(serial);
 		_keyboardSource?.ProcessKeyEvent(key, state, serial);
 	}
 
