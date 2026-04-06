@@ -268,7 +268,7 @@ internal class WaylandClipboardExtension : IClipboardExtension
 		WaylandBindings.wl_proxy_destroy(source);
 	}
 
-	[DllImport("libc")] private static extern int Pipe(int[] fds);
+	[DllImport("libc", EntryPoint = "pipe")] private static extern int Pipe(int[] fds);
 	[DllImport("libc", EntryPoint = "read")] private static extern int Read(int fd, byte[] buf, int count);
 	[DllImport("libc", EntryPoint = "write")] private static extern int Write(int fd, byte[] buf, int count);
 }
