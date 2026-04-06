@@ -218,9 +218,6 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 			}
 		}
 
-		// Initialize clipboard
-		WaylandClipboardExtension.Instance.Initialize(_wlDisplay, _wlDataDeviceManager, _wlSeat);
-
 		// Create surface
 		// wl_compositor.create_surface opcode = 0
 		_wlSurface = WaylandBindings.wl_proxy_marshal_flags(
@@ -364,6 +361,15 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 
 	private unsafe void EventLoop()
 	{
+		// Initialize clipboard on the event thread so all wl_data_device
+		// callbacks are dispatched on this thread
+		if (_wlDataDeviceManager != IntPtr.Zero && _wlSeat != IntPtr.Zero)
+		{
+			WaylandClipboardExtension.Instance.Initialize(_wlDisplay, _wlDataDeviceManager, _wlSeat);
+			// Process any immediate events from clipboard init
+			_ = WaylandBindings.wl_display_roundtrip(_wlDisplay);
+		}
+
 		var fd = WaylandBindings.wl_display_get_fd(_wlDisplay);
 		var pollFd = new PollFd { fd = fd, events = WaylandBindings.POLLIN, revents = 0 };
 
