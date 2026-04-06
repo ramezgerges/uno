@@ -34,7 +34,7 @@
 - [x] T006 [P] Create EGL P/Invoke bindings in `src/Uno.UI.Runtime.Skia.Wayland/Wayland_Bindings/EglBindings.cs` — eglGetDisplay, eglInitialize, eglChooseConfig, eglCreateContext, eglCreateWindowSurface, eglMakeCurrent, eglSwapBuffers, eglDestroySurface, eglDestroyContext, eglTerminate, wl_egl_window_create, wl_egl_window_destroy, wl_egl_window_resize
 - [x] T007 [P] Create xkbcommon P/Invoke bindings in `src/Uno.UI.Runtime.Skia.Wayland/Wayland_Bindings/XkbCommonBindings.cs` — xkb_context_new, xkb_keymap_new_from_string, xkb_state_new, xkb_state_key_get_one_sym, xkb_state_key_get_utf8, xkb_state_update_mask, xkb_state_mod_name_is_active, xkb_keymap_unref, xkb_state_unref, xkb_context_unref
 - [x] T008 Add `Uno.UI.Runtime.Skia.Wayland.csproj` to `src/Uno.UI-Skia-only.slnf` solution filter
-- [ ] T009 Add `Uno.UI.Runtime.Skia.Wayland.csproj` to `src/Uno.UI.sln` solution file
+- [x] T009 Add `Uno.UI.Runtime.Skia.Wayland.csproj` to `src/Uno.UI.sln` solution file
 - [x] T010 Add project reference to `Uno.UI.Runtime.Skia.Wayland` in `src/SamplesApp/SamplesApp.Skia.Generic/SamplesApp.Skia.Generic.csproj`
 - [x] T011 Verify build succeeds: `dotnet build src/Uno.UI.Runtime.Skia.Wayland/Uno.UI.Runtime.Skia.Wayland.csproj -p:UnoTargetFrameworkOverride=net10.0`
 
@@ -207,8 +207,8 @@
 
 ### Implementation for User Story 5
 
-- [ ] T056 [US5] Create `WaylandDragDropExtension` in `src/Uno.UI.Runtime.Skia.Wayland/ApplicationModel/DataTransfer/DragDrop/WaylandDragDropExtension.cs` — implement `IDragDropExtension`. Handle `wl_data_device.enter`, `wl_data_device.motion`, `wl_data_device.leave`, `wl_data_device.drop` events for incoming drags. For outgoing drags: create `wl_data_source`, call `wl_data_device.start_drag()` with source surface and serial. Map `wl_data_offer` MIME types to `DataPackage` formats
-- [ ] T057 [US5] Register drag-drop extension in `WaylandApplicationHost` static constructor — `ApiExtensibility.Register<DragDropManager>(typeof(IDragDropExtension), o => new WaylandDragDropExtension(o))`
+- [x] T056 [US5] Create `WaylandDragDropExtension` in `src/Uno.UI.Runtime.Skia.Wayland/ApplicationModel/DataTransfer/DragDrop/WaylandDragDropExtension.cs` — implement `IDragDropExtension`. Handle `wl_data_device.enter`, `wl_data_device.motion`, `wl_data_device.leave`, `wl_data_device.drop` events for incoming drags. For outgoing drags: create `wl_data_source`, call `wl_data_device.start_drag()` with source surface and serial. Map `wl_data_offer` MIME types to `DataPackage` formats
+- [x] T057 [US5] Register drag-drop extension in `WaylandApplicationHost` static constructor — `ApiExtensibility.Register<DragDropManager>(typeof(IDragDropExtension), o => new WaylandDragDropExtension(o))`
 - [ ] T058 [US5] Validate: drag a file onto SamplesApp drop target, verify data is received
 
 **Checkpoint**: Drag and drop works for incoming and outgoing operations
@@ -239,8 +239,8 @@
 
 ### Implementation for Decorations
 
-- [ ] T062 [P] [US1] Create xdg-decoration bindings in `src/Uno.UI.Runtime.Skia.Wayland/Wayland_Bindings/XdgDecorationBindings.cs` — P/Invoke for `zxdg_decoration_manager_v1` and `zxdg_toplevel_decoration_v1`, listener for `configure` event (server_side/client_side mode)
-- [ ] T063 [US1] Update `WaylandWindowWrapper` in `src/Uno.UI.Runtime.Skia.Wayland/UI/Xaml/Window/WaylandWindowWrapper.cs` — if `zxdg_decoration_manager_v1` is available, request server-side decorations via `set_mode(server_side)`. Handle `configure` callback to know which mode the compositor chose. If protocol unavailable, assume CSD. Implement `ExtendContentIntoTitleBar()` to request/remove CSD
+- [x] T062 [P] [US1] Create xdg-decoration bindings in `src/Uno.UI.Runtime.Skia.Wayland/Wayland_Bindings/XdgDecorationBindings.cs` — P/Invoke for `zxdg_decoration_manager_v1` and `zxdg_toplevel_decoration_v1`, listener for `configure` event (server_side/client_side mode)
+- [x] T063 [US1] Update `WaylandWindowWrapper` in `src/Uno.UI.Runtime.Skia.Wayland/UI/Xaml/Window/WaylandWindowWrapper.cs` — if `zxdg_decoration_manager_v1` is available, request server-side decorations via `set_mode(server_side)`. Handle `configure` callback to know which mode the compositor chose. If protocol unavailable, assume CSD. Implement `ExtendContentIntoTitleBar()` to request/remove CSD
 - [ ] T064 [US1] Validate: run on compositor with decoration protocol support, verify SSD is used; run on compositor without, verify CSD fallback (no title bar but functional)
 
 **Checkpoint**: Window decorations work across compositors

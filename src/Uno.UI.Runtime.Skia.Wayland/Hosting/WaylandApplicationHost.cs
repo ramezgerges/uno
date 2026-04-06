@@ -34,6 +34,8 @@ public partial class WaylandApplicationHost : SkiaHost, ISkiaApplicationHost, ID
 
 		ApiExtensibility.Register(typeof(IClipboardExtension), _ => WaylandClipboardExtension.Instance);
 
+		ApiExtensibility.Register<DragDropManager>(typeof(Windows.ApplicationModel.DataTransfer.DragDrop.Core.IDragDropExtension), o => new WaylandDragDropExtension(o));
+
 		CompositionTarget.FrameRenderingOptions = (true, true);
 	}
 
