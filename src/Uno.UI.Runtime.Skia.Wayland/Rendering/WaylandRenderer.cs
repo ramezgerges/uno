@@ -32,10 +32,16 @@ internal abstract class WaylandRenderer : IDisposable
 			return;
 		}
 
+		var rootElement = _host.RootElement;
+		if (rootElement?.Visual?.CompositionTarget is not CompositionTarget compositionTarget)
+		{
+			return; // UI not ready yet
+		}
+
 		MakeCurrent();
 
 		_surface?.Canvas.Clear(_background);
-		_ = ((CompositionTarget)_host.RootElement!.Visual.CompositionTarget!).OnNativePlatformFrameRequested(_surface?.Canvas, size =>
+		_ = compositionTarget.OnNativePlatformFrameRequested(_surface?.Canvas, size =>
 		{
 			_surface?.Dispose();
 			_surface = UpdateSize((int)size.Width, (int)size.Height);
