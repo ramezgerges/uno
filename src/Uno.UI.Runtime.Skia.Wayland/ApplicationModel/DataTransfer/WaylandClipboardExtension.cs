@@ -130,8 +130,13 @@ internal unsafe class WaylandClipboardExtension : IClipboardExtension
 			};
 			state.OfferListenerHandle = GCHandle.Alloc(offerListener, GCHandleType.Pinned);
 
-			// Roundtrip to receive the selection
+			// Multiple roundtrips needed: first gets data_offer event,
+			// second gets the offer's mime types and selection event
 			_ = WaylandBindings.wl_display_roundtrip(display);
+			if (!state.Done)
+			{
+				_ = WaylandBindings.wl_display_roundtrip(display);
+			}
 
 			string? result = null;
 			if (state.Offer != IntPtr.Zero && state.Done)
