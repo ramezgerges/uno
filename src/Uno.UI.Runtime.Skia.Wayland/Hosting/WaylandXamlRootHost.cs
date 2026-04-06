@@ -297,25 +297,32 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 		// Roundtrip to receive the configure event
 		_ = WaylandBindings.wl_display_roundtrip(_wlDisplay);
 
-		// Try EGL first for GPU acceleration, fall back to software
-		try
+		// Renderer selection: use UNO_WAYLAND_RENDERER env var to control.
+		// Values: "software" (default), "egl" (GPU). EGL is experimental.
+		var rendererPref = Environment.GetEnvironmentVariable("UNO_WAYLAND_RENDERER");
+		if (string.Equals(rendererPref, "egl", StringComparison.OrdinalIgnoreCase))
 		{
-			_renderer = new WaylandEGLRenderer(this, _wlDisplay, _wlSurface, _width, _height);
-			if (this.Log().IsEnabled(LogLevel.Information))
+			try
 			{
-				this.Log().Info("Using EGL GPU renderer");
+				_renderer = new WaylandEGLRenderer(this, _wlDisplay, _wlSurface, _width, _height);
+				if (this.Log().IsEnabled(LogLevel.Information))
+				{
+					this.Log().Info("Using EGL GPU renderer");
+				}
+			}
+			catch (Exception ex)
+			{
+				if (this.Log().IsEnabled(LogLevel.Warning))
+				{
+					this.Log().Warn($"EGL renderer failed ({ex.Message}), falling back to software renderer");
+				}
+				_renderer = null;
 			}
 		}
-		catch (Exception ex)
+
+		if (_renderer == null && _wlShm != IntPtr.Zero)
 		{
-			if (this.Log().IsEnabled(LogLevel.Warning))
-			{
-				this.Log().Warn($"EGL renderer failed ({ex.Message}), falling back to software renderer");
-			}
-			if (_wlShm != IntPtr.Zero)
-			{
-				_renderer = new WaylandSoftwareRenderer(this, _wlDisplay, _wlSurface, _wlShm);
-			}
+			_renderer = new WaylandSoftwareRenderer(this, _wlDisplay, _wlSurface, _wlShm);
 		}
 
 		if (this.Log().IsEnabled(LogLevel.Information))
