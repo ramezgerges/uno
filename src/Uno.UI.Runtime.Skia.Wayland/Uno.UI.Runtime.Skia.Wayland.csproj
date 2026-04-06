@@ -35,6 +35,11 @@
 			<Pack>true</Pack>
 			<PackagePath>runtimes/linux-x64/native</PackagePath>
 		</Content>
+		<Content Include="runtimes\linux-x64\native\libuno-clipboard.so">
+			<CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+			<Pack>true</Pack>
+			<PackagePath>runtimes/linux-x64/native</PackagePath>
+		</Content>
 	</ItemGroup>
 
 	<ItemGroup>
