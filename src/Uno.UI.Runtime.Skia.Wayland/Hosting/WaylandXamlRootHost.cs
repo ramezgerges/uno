@@ -36,6 +36,7 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	private IntPtr _wlKeyboard;
 	private IntPtr _xdgWmBase;
 	private IntPtr _xdgDecorationManager;
+	private IntPtr _wlDataDeviceManager;
 	private IntPtr _cursorShapeManager;
 	private IntPtr _cursorShapeDevice;
 	private IntPtr _cursorTheme;
@@ -360,6 +361,12 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 
 	private unsafe void EventLoop()
 	{
+		// Init clipboard on the event thread (same thread that dispatches events)
+		if (_wlDataDeviceManager != IntPtr.Zero && _wlSeat != IntPtr.Zero)
+		{
+			WaylandClipboardExtension.Instance.Initialize(_wlDisplay, _wlDataDeviceManager, _wlSeat);
+		}
+
 		var fd = WaylandBindings.wl_display_get_fd(_wlDisplay);
 		var pollFd = new PollFd { fd = fd, events = WaylandBindings.POLLIN, revents = 0 };
 
@@ -457,6 +464,10 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 				break;
 			case "wl_shm":
 				_wlShm = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.wl_shm_interface, Math.Min(version, 1u));
+				break;
+			case "wl_data_device_manager":
+				// Bind at v1 to keep listener structs simple (no v3 DnD events)
+				_wlDataDeviceManager = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.wl_data_device_manager_interface, 1u);
 				break;
 			case "wl_seat":
 				_wlSeat = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.wl_seat_interface, Math.Min(version, 5u));
