@@ -126,12 +126,18 @@ internal class WaylandEGLRenderer : WaylandRenderer, IDisposable
 			throw new InvalidOperationException("wl_egl_window_create failed.");
 		}
 
-		// Create EGL window surface using a pointer to the wl_egl_window handle
-		var wlEglWindowLocal = _wlEglWindow;
-		_eglSurface = EglHelper.EglCreatePlatformWindowSurface(_eglDisplay, _eglConfig, new IntPtr(&wlEglWindowLocal), [EglHelper.EGL_NONE]);
+		// Create EGL window surface.
+		// On Wayland, eglCreatePlatformWindowSurface expects wl_egl_window* directly (not &pointer).
+		// This differs from X11 where it expects Window* (pointer to the XID).
+		_eglSurface = EglHelper.EglCreatePlatformWindowSurface(_eglDisplay, _eglConfig, _wlEglWindow, [EglHelper.EGL_NONE]);
 		if (_eglSurface == IntPtr.Zero)
 		{
-			throw new InvalidOperationException($"eglCreatePlatformWindowSurface failed: {Enum.GetName(EglHelper.EglGetError())}");
+			// Fallback: try eglCreateWindowSurface (EGL 1.4 API)
+			_eglSurface = EglBindings.eglCreateWindowSurface(_eglDisplay, _eglConfig, _wlEglWindow, null);
+		}
+		if (_eglSurface == IntPtr.Zero)
+		{
+			throw new InvalidOperationException($"eglCreateWindowSurface failed: {Enum.GetName(EglHelper.EglGetError())}");
 		}
 
 		// Make context current to create GRContext
