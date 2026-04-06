@@ -81,7 +81,11 @@ internal unsafe class WaylandClipboardExtension : IClipboardExtension
 	private static string? PasteText()
 	{
 		var display = WaylandBindings.wl_display_connect(null);
-		if (display == IntPtr.Zero) { return null; }
+		if (display == IntPtr.Zero)
+		{
+			Console.Error.WriteLine("[Clipboard] wl_display_connect failed");
+			return null;
+		}
 
 		try
 		{
@@ -94,9 +98,11 @@ internal unsafe class WaylandClipboardExtension : IClipboardExtension
 			var regHandle = GCHandle.Alloc(registryListener, GCHandleType.Pinned);
 
 			var registry = WaylandBindings.wl_display_get_registry(display);
+			Console.Error.WriteLine($"[Clipboard] registry={registry}");
 			_ = WaylandBindings.wl_proxy_add_listener(registry, regHandle.AddrOfPinnedObject(), IntPtr.Zero);
 			_ = WaylandBindings.wl_display_roundtrip(display);
 
+			Console.Error.WriteLine($"[Clipboard] seat={state.Seat} manager={state.Manager}");
 			if (state.Seat == IntPtr.Zero || state.Manager == IntPtr.Zero)
 			{
 				regHandle.Free();
@@ -130,12 +136,13 @@ internal unsafe class WaylandClipboardExtension : IClipboardExtension
 			};
 			state.OfferListenerHandle = GCHandle.Alloc(offerListener, GCHandleType.Pinned);
 
-			// Multiple roundtrips needed: first gets data_offer event,
-			// second gets the offer's mime types and selection event
+			// Multiple roundtrips to receive all events
 			_ = WaylandBindings.wl_display_roundtrip(display);
+			Console.Error.WriteLine($"[Clipboard] after roundtrip1: offer={state.Offer} done={state.Done} mimes={state.MimeTypes.Count}");
 			if (!state.Done)
 			{
 				_ = WaylandBindings.wl_display_roundtrip(display);
+				Console.Error.WriteLine($"[Clipboard] after roundtrip2: offer={state.Offer} done={state.Done} mimes={state.MimeTypes.Count}");
 			}
 
 			string? result = null;
