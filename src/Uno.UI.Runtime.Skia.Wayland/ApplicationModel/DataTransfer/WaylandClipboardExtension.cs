@@ -13,36 +13,33 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	private static WaylandClipboardExtension? _instance;
 	internal static WaylandClipboardExtension Instance => _instance ??= new();
 
-	private readonly object _lock = new();
 	private IntPtr _wlDisplay;
 	private IntPtr _wlDataDevice;
 	private IntPtr _wlDataDeviceManager;
+	private IntPtr _wlSeat;
+	private bool _initialized;
+
+	// Cached clipboard text — set from event thread, read from UI thread
+	private volatile string? _cachedIncomingText;
 	private string? _copiedText;
 	private IntPtr _currentOffer;
 	private IntPtr _currentSource;
 	private readonly List<string> _offerMimeTypes = new();
 
-	// Keep ALL delegates as fields to prevent GC
+	// Delegates — stored as fields to prevent GC
 	private WlDataDeviceDataOfferDelegate? _ddDataOffer;
 	private WlDataDeviceSelectionDelegate? _ddSelection;
 	private WlDataOfferOfferDelegate? _doOffer;
 	private WlDataSourceSendDelegate? _dsSend;
 	private WlDataSourceCancelledDelegate? _dsCancelled;
-
-	// Pinned listener memory — allocated ONCE, never freed during runtime
 	private GCHandle _ddListenerHandle;
 	private GCHandle _doListenerHandle;
 	private GCHandle _dsListenerHandle;
-
-	// Pre-built data offer listener (reused for every offer)
 	private bool _doListenerReady;
 
 	public event EventHandler<object>? ContentChanged;
 	public void StartContentChanged() { }
 	public void StopContentChanged() { }
-
-	private IntPtr _wlSeat;
-	private bool _initialized;
 
 	internal void SetWaylandObjects(IntPtr wlDisplay, IntPtr wlDataDeviceManager, IntPtr wlSeat)
 	{
@@ -58,35 +55,21 @@ internal class WaylandClipboardExtension : IClipboardExtension
 			return;
 		}
 		_initialized = true;
-		Initialize();
-	}
 
-	private void Initialize()
-	{
-
-		// Create delegates ONCE
 		_ddDataOffer = OnDataOffer;
 		_ddSelection = OnSelection;
 		_doOffer = OnOfferMimeType;
 		_dsSend = OnSourceSend;
 		_dsCancelled = OnSourceCancelled;
 
-		// Create data device: get_data_device opcode=1, args: new_id, seat
+		// Create data device
 		_wlDataDevice = WaylandBindings.wl_proxy_marshal_flags(
 			_wlDataDeviceManager, 1, WaylandInterfaces.wl_data_device_interface,
 			WaylandBindings.wl_proxy_get_version(_wlDataDeviceManager), 0,
 			IntPtr.Zero, _wlSeat);
 
-		if (_wlDataDevice == IntPtr.Zero)
-		{
-			return;
-		}
+		if (_wlDataDevice == IntPtr.Zero) { return; }
 
-		// Allocate listener with ALL 6 slots as zero (NULL).
-		// Only data_offer and selection are set — the DnD events
-		// (enter/leave/motion/drop) are NULL because they only fire
-		// during active drag operations which we don't initiate.
-		// This matches the pattern used by wl-clipboard.
 		var ddListener = new WlDataDeviceListener
 		{
 			data_offer = Marshal.GetFunctionPointerForDelegate(_ddDataOffer),
@@ -97,10 +80,8 @@ internal class WaylandClipboardExtension : IClipboardExtension
 			selection = Marshal.GetFunctionPointerForDelegate(_ddSelection),
 		};
 		_ddListenerHandle = GCHandle.Alloc(ddListener, GCHandleType.Pinned);
-		_ = WaylandBindings.wl_proxy_add_listener(
-			_wlDataDevice, _ddListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
+		_ = WaylandBindings.wl_proxy_add_listener(_wlDataDevice, _ddListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
 
-		// Pre-build the data offer listener (1 slot at v1)
 		var doListener = new WlDataOfferListener
 		{
 			offer = Marshal.GetFunctionPointerForDelegate(_doOffer),
@@ -110,15 +91,17 @@ internal class WaylandClipboardExtension : IClipboardExtension
 		_doListenerHandle = GCHandle.Alloc(doListener, GCHandleType.Pinned);
 		_doListenerReady = true;
 
-		if (this.Log().IsEnabled(LogLevel.Debug))
-		{
-			this.Log().Debug("Wayland clipboard initialized");
-		}
+		// Do a roundtrip to get the initial selection — this is safe because
+		// EnsureInitialized is called from GetContent/SetContent on the UI thread,
+		// and the event thread hasn't started dispatching data device events yet
+		// (the data device was just created).
+		_ = WaylandBindings.wl_display_roundtrip(_wlDisplay);
 	}
 
 	public void Clear()
 	{
 		_copiedText = null;
+		_cachedIncomingText = null;
 		ContentChanged?.Invoke(this, EventArgs.Empty);
 	}
 
@@ -128,30 +111,16 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	{
 		EnsureInitialized();
 
-		if (_currentOffer != IntPtr.Zero)
+		// Return cached incoming text (eagerly read on event thread)
+		var incoming = _cachedIncomingText;
+		if (incoming != null)
 		{
-			string? mime = null;
-			if (_offerMimeTypes.Contains("text/plain;charset=utf-8"))
-			{
-				mime = "text/plain;charset=utf-8";
-			}
-			else if (_offerMimeTypes.Contains("text/plain"))
-			{
-				mime = "text/plain";
-			}
-
-			if (mime != null)
-			{
-				var text = ReadOffer(mime);
-				if (text != null)
-				{
-					var p = new DataPackage();
-					p.SetText(text);
-					return p.GetView();
-				}
-			}
+			var p = new DataPackage();
+			p.SetText(incoming);
+			return p.GetView();
 		}
 
+		// Fallback to our own copied text
 		if (_copiedText != null)
 		{
 			var p = new DataPackage();
@@ -176,45 +145,42 @@ internal class WaylandClipboardExtension : IClipboardExtension
 		}
 		catch { _copiedText = null; }
 
-		if (_copiedText != null && _wlDataDeviceManager != IntPtr.Zero && _wlDataDevice != IntPtr.Zero)
+		if (_copiedText != null && _wlDataDevice != IntPtr.Zero)
 		{
-			lock (_lock)
+			if (_currentSource != IntPtr.Zero)
 			{
-				if (_currentSource != IntPtr.Zero)
+				if (_dsListenerHandle.IsAllocated) { _dsListenerHandle.Free(); }
+				WaylandBindings.wl_proxy_destroy(_currentSource);
+			}
+
+			_currentSource = WaylandBindings.wl_proxy_marshal_flags(
+				_wlDataDeviceManager, 0, WaylandInterfaces.wl_data_source_interface,
+				WaylandBindings.wl_proxy_get_version(_wlDataDeviceManager), 0, IntPtr.Zero);
+
+			if (_currentSource != IntPtr.Zero)
+			{
+				var dsListener = new WlDataSourceListener
 				{
-					if (_dsListenerHandle.IsAllocated) { _dsListenerHandle.Free(); }
-					WaylandBindings.wl_proxy_destroy(_currentSource);
-				}
+					target = IntPtr.Zero,
+					send = Marshal.GetFunctionPointerForDelegate(_dsSend!),
+					cancelled = Marshal.GetFunctionPointerForDelegate(_dsCancelled!),
+					dnd_drop_performed = IntPtr.Zero,
+					dnd_finished = IntPtr.Zero,
+					action = IntPtr.Zero,
+				};
+				_dsListenerHandle = GCHandle.Alloc(dsListener, GCHandleType.Pinned);
+				_ = WaylandBindings.wl_proxy_add_listener(
+					_currentSource, _dsListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
 
-				_currentSource = WaylandBindings.wl_proxy_marshal_flags(
-					_wlDataDeviceManager, 0, WaylandInterfaces.wl_data_source_interface,
-					WaylandBindings.wl_proxy_get_version(_wlDataDeviceManager), 0, IntPtr.Zero);
+				OfferMime(_currentSource, "text/plain;charset=utf-8");
+				OfferMime(_currentSource, "text/plain");
 
-				if (_currentSource != IntPtr.Zero)
-				{
-					var dsListener = new WlDataSourceListener
-					{
-						target = IntPtr.Zero,
-						send = Marshal.GetFunctionPointerForDelegate(_dsSend!),
-						cancelled = Marshal.GetFunctionPointerForDelegate(_dsCancelled!),
-						dnd_drop_performed = IntPtr.Zero,
-						dnd_finished = IntPtr.Zero,
-						action = IntPtr.Zero,
-					};
-					_dsListenerHandle = GCHandle.Alloc(dsListener, GCHandleType.Pinned);
-					_ = WaylandBindings.wl_proxy_add_listener(
-						_currentSource, _dsListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
+				WaylandBindings.wl_proxy_marshal_flags(
+					_wlDataDevice, 1, IntPtr.Zero,
+					WaylandBindings.wl_proxy_get_version(_wlDataDevice), 0,
+					_currentSource, IntPtr.Zero);
 
-					OfferMime(_currentSource, "text/plain;charset=utf-8");
-					OfferMime(_currentSource, "text/plain");
-
-					WaylandBindings.wl_proxy_marshal_flags(
-						_wlDataDevice, 1, IntPtr.Zero,
-						WaylandBindings.wl_proxy_get_version(_wlDataDevice), 0,
-						_currentSource, IntPtr.Zero);
-
-					_ = WaylandBindings.wl_display_flush(_wlDisplay);
-				}
+				_ = WaylandBindings.wl_display_flush(_wlDisplay);
 			}
 		}
 		ContentChanged?.Invoke(this, EventArgs.Empty);
@@ -227,31 +193,27 @@ internal class WaylandClipboardExtension : IClipboardExtension
 		finally { Marshal.FreeHGlobal(p); }
 	}
 
-	private string? ReadOffer(string mime)
+	/// <summary>
+	/// Read text from an offer — called on the EVENT THREAD only.
+	/// </summary>
+	private string? ReadOfferOnEventThread(IntPtr offer, string mime)
 	{
 		var fds = new int[2];
 		if (Pipe(fds) != 0) { return null; }
 
-		// Send the receive request under lock to prevent concurrent
-		// access to the Wayland display fd with the event thread
-		lock (_lock)
+		var p = Marshal.StringToHGlobalAnsi(mime);
+		try
 		{
-			var p = Marshal.StringToHGlobalAnsi(mime);
-			try
-			{
-				WaylandBindings.wl_proxy_marshal_flags(
-					_currentOffer, 0, IntPtr.Zero,
-					WaylandBindings.wl_proxy_get_version(_currentOffer), 0, p, fds[1]);
-			}
-			finally { Marshal.FreeHGlobal(p); }
-
-			_ = WaylandBindings.wl_display_flush(_wlDisplay);
+			WaylandBindings.wl_proxy_marshal_flags(
+				offer, 0, IntPtr.Zero,
+				WaylandBindings.wl_proxy_get_version(offer), 0, p, fds[1]);
 		}
+		finally { Marshal.FreeHGlobal(p); }
 
-		// Close write end — the compositor writes to the pipe fd directly
 		_ = WaylandBindings.close(fds[1]);
+		_ = WaylandBindings.wl_display_flush(_wlDisplay);
 
-		// Blocking read — compositor writes data to the pipe asynchronously
+		// Blocking read — safe because compositor writes to pipe directly
 		var buf = new byte[65536];
 		var sb = new StringBuilder();
 		int n;
@@ -262,6 +224,8 @@ internal class WaylandClipboardExtension : IClipboardExtension
 		_ = WaylandBindings.close(fds[0]);
 		return sb.Length > 0 ? sb.ToString() : null;
 	}
+
+	// --- Event thread callbacks ---
 
 	private void OnDataOffer(IntPtr data, IntPtr dd, IntPtr offer)
 	{
@@ -280,6 +244,27 @@ internal class WaylandClipboardExtension : IClipboardExtension
 			WaylandBindings.wl_proxy_destroy(_currentOffer);
 		}
 		_currentOffer = offer;
+
+		// Eagerly read the clipboard text RIGHT HERE on the event thread.
+		// This avoids any cross-thread Wayland protocol calls.
+		_cachedIncomingText = null;
+		if (offer != IntPtr.Zero)
+		{
+			string? mime = null;
+			if (_offerMimeTypes.Contains("text/plain;charset=utf-8"))
+			{
+				mime = "text/plain;charset=utf-8";
+			}
+			else if (_offerMimeTypes.Contains("text/plain"))
+			{
+				mime = "text/plain";
+			}
+
+			if (mime != null)
+			{
+				_cachedIncomingText = ReadOfferOnEventThread(offer, mime);
+			}
+		}
 	}
 
 	private void OnOfferMimeType(IntPtr data, IntPtr offer, string mime) => _offerMimeTypes.Add(mime);
@@ -303,5 +288,4 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	[DllImport("libc", EntryPoint = "pipe")] private static extern int Pipe(int[] fds);
 	[DllImport("libc", EntryPoint = "read")] private static extern int Read(int fd, byte[] buf, int count);
 	[DllImport("libc", EntryPoint = "write")] private static extern int Write(int fd, byte[] buf, int count);
-	[DllImport("libc", EntryPoint = "fcntl")] private static extern int Fcntl(int fd, int cmd, int arg);
 }
