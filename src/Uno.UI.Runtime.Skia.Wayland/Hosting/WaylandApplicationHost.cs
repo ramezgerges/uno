@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.UI.Xaml;
+using Uno.ApplicationModel.DataTransfer;
 using Uno.Foundation.Extensibility;
 using Uno.Foundation.Logging;
 using Uno.Helpers;
@@ -28,6 +29,10 @@ public partial class WaylandApplicationHost : SkiaHost, ISkiaApplicationHost, ID
 
 		ApiExtensibility.Register<IXamlRootHost>(typeof(IUnoCorePointerInputSource), o => new WaylandPointerInputSource(o));
 		ApiExtensibility.Register<IXamlRootHost>(typeof(IUnoKeyboardInputSource), o => new WaylandKeyboardInputSource(o));
+
+		ApiExtensibility.Register<XamlRoot>(typeof(Uno.Graphics.INativeOpenGLWrapper), xamlRoot => new WaylandNativeOpenGLWrapper(xamlRoot));
+
+		ApiExtensibility.Register(typeof(IClipboardExtension), _ => WaylandClipboardExtension.Instance);
 
 		CompositionTarget.FrameRenderingOptions = (true, true);
 	}

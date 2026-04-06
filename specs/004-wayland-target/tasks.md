@@ -159,8 +159,8 @@
 
 ### Implementation for User Story 3
 
-- [ ] T047 [US3] Create `WaylandClipboardExtension` in `src/Uno.UI.Runtime.Skia.Wayland/ApplicationModel/DataTransfer/WaylandClipboardExtension.cs` — implement `IClipboardExtension`. **Set clipboard**: create `wl_data_source` with offered MIME types (`text/plain`, `text/plain;charset=utf-8`), set on `wl_data_device` via `set_selection()`. Handle `wl_data_source.send` event by writing data to the provided fd. **Get clipboard**: listen for `wl_data_device.selection` event providing a `wl_data_offer`, enumerate MIME types via `wl_data_offer.offer` events, on paste request `wl_data_offer.receive()` with a pipe, read data from pipe fd. Handle async nature with `TaskCompletionSource`
-- [ ] T048 [US3] Register clipboard extension in `WaylandApplicationHost` static constructor — `ApiExtensibility.Register(typeof(IClipboardExtension), _ => WaylandClipboardExtension.Instance)`
+- [x] T047 [US3] Create `WaylandClipboardExtension` in `src/Uno.UI.Runtime.Skia.Wayland/ApplicationModel/DataTransfer/WaylandClipboardExtension.cs` — implement `IClipboardExtension`. **Set clipboard**: create `wl_data_source` with offered MIME types (`text/plain`, `text/plain;charset=utf-8`), set on `wl_data_device` via `set_selection()`. Handle `wl_data_source.send` event by writing data to the provided fd. **Get clipboard**: listen for `wl_data_device.selection` event providing a `wl_data_offer`, enumerate MIME types via `wl_data_offer.offer` events, on paste request `wl_data_offer.receive()` with a pipe, read data from pipe fd. Handle async nature with `TaskCompletionSource`
+- [x] T048 [US3] Register clipboard extension in `WaylandApplicationHost` static constructor — `ApiExtensibility.Register(typeof(IClipboardExtension), _ => WaylandClipboardExtension.Instance)`
 - [ ] T049 [US3] Validate: run SamplesApp, copy text from another app, paste into TextBox; copy from TextBox, paste into another app
 
 **Checkpoint**: Clipboard works between Uno app and native Wayland apps
@@ -191,8 +191,8 @@
 
 ### Implementation for User Story 6
 
-- [ ] T053 [P] [US6] Create cursor shape bindings in `src/Uno.UI.Runtime.Skia.Wayland/Wayland_Bindings/CursorShapeBindings.cs` — P/Invoke for `wp_cursor_shape_manager_v1` and `wp_cursor_shape_device_v1`, `set_shape()` request with shape enum values (default, text, pointer, grab, etc.)
-- [ ] T054 [US6] Update `WaylandPointerInputSource.PointerCursor` setter in `src/Uno.UI.Runtime.Skia.Wayland/Devices/Input/WaylandPointerInputSource.cs` — map Uno `CoreCursorType` to `wp_cursor_shape_device_v1` shape values. If `cursor-shape-v1` protocol unavailable, fall back to loading cursor images from `wl_cursor_theme` (via `libwayland-cursor.so` P/Invoke) and setting cursor surface manually via `wl_pointer_set_cursor()`
+- [x] T053 [P] [US6] Create cursor shape bindings in `src/Uno.UI.Runtime.Skia.Wayland/Wayland_Bindings/CursorShapeBindings.cs` — P/Invoke for `wp_cursor_shape_manager_v1` and `wp_cursor_shape_device_v1`, `set_shape()` request with shape enum values (default, text, pointer, grab, etc.)
+- [x] T054 [US6] Update `WaylandPointerInputSource.PointerCursor` setter in `src/Uno.UI.Runtime.Skia.Wayland/Devices/Input/WaylandPointerInputSource.cs` — map Uno `CoreCursorType` to `wp_cursor_shape_device_v1` shape values. If `cursor-shape-v1` protocol unavailable, fall back to loading cursor images from `wl_cursor_theme` (via `libwayland-cursor.so` P/Invoke) and setting cursor surface manually via `wl_pointer_set_cursor()`
 - [ ] T055 [US6] Validate: hover over interactive elements in SamplesApp, verify cursor shape changes
 
 **Checkpoint**: Cursor management works

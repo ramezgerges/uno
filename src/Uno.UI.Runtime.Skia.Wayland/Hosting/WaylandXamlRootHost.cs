@@ -36,6 +36,8 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	private IntPtr _wlKeyboard;
 	private IntPtr _xdgWmBase;
 	private IntPtr _xdgDecorationManager;
+	private IntPtr _cursorShapeManager;
+	private IntPtr _cursorShapeDevice;
 	private IntPtr _wlSurface;
 	private IntPtr _xdgSurface;
 	private IntPtr _xdgToplevel;
@@ -131,6 +133,7 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	internal IntPtr WlDisplay => _wlDisplay;
 	internal IntPtr WlSurface => _wlSurface;
 	internal IntPtr WlShm => _wlShm;
+	internal IntPtr CursorShapeDevice => _cursorShapeDevice;
 	internal int Width => _width;
 	internal int Height => _height;
 
@@ -255,10 +258,25 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 		// Roundtrip to receive the configure event
 		_ = WaylandBindings.wl_display_roundtrip(_wlDisplay);
 
-		// Create renderer (software for now, EGL can be added later)
-		if (_wlShm != IntPtr.Zero)
+		// Try EGL first for GPU acceleration, fall back to software
+		try
 		{
-			_renderer = new WaylandSoftwareRenderer(this, _wlDisplay, _wlSurface, _wlShm);
+			_renderer = new WaylandEGLRenderer(this, _wlDisplay, _wlSurface, _width, _height);
+			if (this.Log().IsEnabled(LogLevel.Information))
+			{
+				this.Log().Info("Using EGL GPU renderer");
+			}
+		}
+		catch (Exception ex)
+		{
+			if (this.Log().IsEnabled(LogLevel.Warning))
+			{
+				this.Log().Warn($"EGL renderer failed ({ex.Message}), falling back to software renderer");
+			}
+			if (_wlShm != IntPtr.Zero)
+			{
+				_renderer = new WaylandSoftwareRenderer(this, _wlDisplay, _wlSurface, _wlShm);
+			}
 		}
 
 		if (this.Log().IsEnabled(LogLevel.Information))
@@ -412,6 +430,9 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 			case "zxdg_decoration_manager_v1":
 				_xdgDecorationManager = WaylandBindings.wl_registry_bind_with_name(registry, name, "zxdg_decoration_manager_v1", Math.Min(version, 1u));
 				break;
+			case "wp_cursor_shape_manager_v1":
+				_cursorShapeManager = WaylandBindings.wl_registry_bind_with_name(registry, name, "wp_cursor_shape_manager_v1", Math.Min(version, 1u));
+				break;
 			case "xdg_wm_base":
 				_xdgWmBase = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.xdg_wm_base_interface, Math.Min(version, 4u));
 				// Set up xdg_wm_base listener (for ping)
@@ -524,6 +545,15 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 			};
 			_pointerListenerHandle = GCHandle.Alloc(pointerListener, GCHandleType.Pinned);
 			_ = WaylandBindings.wl_proxy_add_listener(_wlPointer, _pointerListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
+
+			if (_cursorShapeManager != IntPtr.Zero)
+			{
+				// wp_cursor_shape_manager_v1.get_pointer opcode = 1, args: new_id, pointer
+				_cursorShapeDevice = WaylandBindings.wl_proxy_marshal_flags(
+					_cursorShapeManager, CursorShape.WP_CURSOR_SHAPE_MANAGER_V1_GET_POINTER,
+					IntPtr.Zero, WaylandBindings.wl_proxy_get_version(_cursorShapeManager), 0,
+					IntPtr.Zero, _wlPointer);
+			}
 
 			if (this.Log().IsEnabled(LogLevel.Debug))
 			{
@@ -676,6 +706,10 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 		if (_windowToHost.TryRemove(_window, out _))
 		{
 			// Destroy Wayland objects in reverse order
+			if (_cursorShapeDevice != IntPtr.Zero)
+			{
+				WaylandBindings.wl_proxy_destroy(_cursorShapeDevice);
+			}
 			if (_wlPointer != IntPtr.Zero)
 			{
 				WaylandBindings.wl_proxy_destroy(_wlPointer);

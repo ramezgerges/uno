@@ -45,6 +45,7 @@ internal class WaylandPointerInputSource : IUnoCorePointerInputSource
 	private bool _isLeftButtonPressed;
 	private bool _isMiddleButtonPressed;
 	private bool _isRightButtonPressed;
+	private uint _lastPointerSerial;
 	private PointerPointProperties? _previousPointerPointProperties;
 
 	public WaylandPointerInputSource(IXamlRootHost host)
@@ -69,7 +70,33 @@ internal class WaylandPointerInputSource : IUnoCorePointerInputSource
 		set
 		{
 			_pointerCursor = value;
-			// TODO: Implement cursor shape changes via wp_cursor_shape_manager_v1 or wl_cursor
+
+			var shape = value.Type switch
+			{
+				CoreCursorType.Arrow => WpCursorShapeDeviceV1Shape.Default,
+				CoreCursorType.Cross => WpCursorShapeDeviceV1Shape.Crosshair,
+				CoreCursorType.Hand => WpCursorShapeDeviceV1Shape.Pointer,
+				CoreCursorType.Help => WpCursorShapeDeviceV1Shape.Help,
+				CoreCursorType.IBeam => WpCursorShapeDeviceV1Shape.Text,
+				CoreCursorType.SizeAll => WpCursorShapeDeviceV1Shape.AllScroll,
+				CoreCursorType.SizeNortheastSouthwest => WpCursorShapeDeviceV1Shape.NESWResize,
+				CoreCursorType.SizeNorthSouth => WpCursorShapeDeviceV1Shape.NSResize,
+				CoreCursorType.SizeNorthwestSoutheast => WpCursorShapeDeviceV1Shape.NWSEResize,
+				CoreCursorType.SizeWestEast => WpCursorShapeDeviceV1Shape.EWResize,
+				CoreCursorType.UniversalNo => WpCursorShapeDeviceV1Shape.NotAllowed,
+				CoreCursorType.UpArrow => WpCursorShapeDeviceV1Shape.NResize,
+				CoreCursorType.Wait => WpCursorShapeDeviceV1Shape.Wait,
+				_ => WpCursorShapeDeviceV1Shape.Default
+			};
+
+			if (_host.CursorShapeDevice != IntPtr.Zero && _lastPointerSerial != 0)
+			{
+				// wp_cursor_shape_device_v1.set_shape opcode = 1, args: serial, shape
+				WaylandBindings.wl_proxy_marshal_flags(
+					_host.CursorShapeDevice, CursorShape.WP_CURSOR_SHAPE_DEVICE_V1_SET_SHAPE,
+					IntPtr.Zero, WaylandBindings.wl_proxy_get_version(_host.CursorShapeDevice), 0,
+					(IntPtr)_lastPointerSerial, (IntPtr)(uint)shape);
+			}
 		}
 	}
 
@@ -82,6 +109,7 @@ internal class WaylandPointerInputSource : IUnoCorePointerInputSource
 
 	internal void ProcessPointerEnter(uint serial, double x, double y)
 	{
+		_lastPointerSerial = serial;
 		_mousePosition = new Point(x, y);
 
 		var args = CreatePointerEventArgsFromCurrentState();
@@ -104,6 +132,7 @@ internal class WaylandPointerInputSource : IUnoCorePointerInputSource
 
 	internal void ProcessPointerButton(uint serial, uint time, uint button, uint state)
 	{
+		_lastPointerSerial = serial;
 		var isPressed = state == WL_POINTER_BUTTON_STATE_PRESSED;
 
 		switch (button)
