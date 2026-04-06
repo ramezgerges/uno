@@ -13,6 +13,7 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	private static WaylandClipboardExtension? _instance;
 	internal static WaylandClipboardExtension Instance => _instance ??= new();
 
+	private readonly object _lock = new();
 	private IntPtr _wlDisplay;
 	private IntPtr _wlDataDevice;
 	private IntPtr _wlDataDeviceManager;
@@ -177,42 +178,43 @@ internal class WaylandClipboardExtension : IClipboardExtension
 
 		if (_copiedText != null && _wlDataDeviceManager != IntPtr.Zero && _wlDataDevice != IntPtr.Zero)
 		{
-			if (_currentSource != IntPtr.Zero)
+			lock (_lock)
 			{
-				if (_dsListenerHandle.IsAllocated) { _dsListenerHandle.Free(); }
-				WaylandBindings.wl_proxy_destroy(_currentSource);
-			}
-
-			// create_data_source opcode=0
-			_currentSource = WaylandBindings.wl_proxy_marshal_flags(
-				_wlDataDeviceManager, 0, WaylandInterfaces.wl_data_source_interface,
-				WaylandBindings.wl_proxy_get_version(_wlDataDeviceManager), 0, IntPtr.Zero);
-
-			if (_currentSource != IntPtr.Zero)
-			{
-				var dsListener = new WlDataSourceListener
+				if (_currentSource != IntPtr.Zero)
 				{
-					target = IntPtr.Zero,
-					send = Marshal.GetFunctionPointerForDelegate(_dsSend!),
-					cancelled = Marshal.GetFunctionPointerForDelegate(_dsCancelled!),
-					dnd_drop_performed = IntPtr.Zero,
-					dnd_finished = IntPtr.Zero,
-					action = IntPtr.Zero,
-				};
-				_dsListenerHandle = GCHandle.Alloc(dsListener, GCHandleType.Pinned);
-				_ = WaylandBindings.wl_proxy_add_listener(
-					_currentSource, _dsListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
+					if (_dsListenerHandle.IsAllocated) { _dsListenerHandle.Free(); }
+					WaylandBindings.wl_proxy_destroy(_currentSource);
+				}
 
-				OfferMime(_currentSource, "text/plain;charset=utf-8");
-				OfferMime(_currentSource, "text/plain");
+				_currentSource = WaylandBindings.wl_proxy_marshal_flags(
+					_wlDataDeviceManager, 0, WaylandInterfaces.wl_data_source_interface,
+					WaylandBindings.wl_proxy_get_version(_wlDataDeviceManager), 0, IntPtr.Zero);
 
-				// set_selection opcode=1, args: source, serial(0)
-				WaylandBindings.wl_proxy_marshal_flags(
-					_wlDataDevice, 1, IntPtr.Zero,
-					WaylandBindings.wl_proxy_get_version(_wlDataDevice), 0,
-					_currentSource, IntPtr.Zero);
+				if (_currentSource != IntPtr.Zero)
+				{
+					var dsListener = new WlDataSourceListener
+					{
+						target = IntPtr.Zero,
+						send = Marshal.GetFunctionPointerForDelegate(_dsSend!),
+						cancelled = Marshal.GetFunctionPointerForDelegate(_dsCancelled!),
+						dnd_drop_performed = IntPtr.Zero,
+						dnd_finished = IntPtr.Zero,
+						action = IntPtr.Zero,
+					};
+					_dsListenerHandle = GCHandle.Alloc(dsListener, GCHandleType.Pinned);
+					_ = WaylandBindings.wl_proxy_add_listener(
+						_currentSource, _dsListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
 
-				_ = WaylandBindings.wl_display_flush(_wlDisplay);
+					OfferMime(_currentSource, "text/plain;charset=utf-8");
+					OfferMime(_currentSource, "text/plain");
+
+					WaylandBindings.wl_proxy_marshal_flags(
+						_wlDataDevice, 1, IntPtr.Zero,
+						WaylandBindings.wl_proxy_get_version(_wlDataDevice), 0,
+						_currentSource, IntPtr.Zero);
+
+					_ = WaylandBindings.wl_display_flush(_wlDisplay);
+				}
 			}
 		}
 		ContentChanged?.Invoke(this, EventArgs.Empty);
@@ -229,21 +231,34 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	{
 		var fds = new int[2];
 		if (Pipe(fds) != 0) { return null; }
-		var p = Marshal.StringToHGlobalAnsi(mime);
-		try
+
+		// Send the receive request under lock to prevent concurrent
+		// access to the Wayland display fd with the event thread
+		lock (_lock)
 		{
-			// wl_data_offer.receive opcode=0, args: string, fd
-			WaylandBindings.wl_proxy_marshal_flags(
-				_currentOffer, 0, IntPtr.Zero,
-				WaylandBindings.wl_proxy_get_version(_currentOffer), 0, p, fds[1]);
+			var p = Marshal.StringToHGlobalAnsi(mime);
+			try
+			{
+				WaylandBindings.wl_proxy_marshal_flags(
+					_currentOffer, 0, IntPtr.Zero,
+					WaylandBindings.wl_proxy_get_version(_currentOffer), 0, p, fds[1]);
+			}
+			finally { Marshal.FreeHGlobal(p); }
+
+			_ = WaylandBindings.wl_display_flush(_wlDisplay);
 		}
-		finally { Marshal.FreeHGlobal(p); }
+
+		// Close write end — the compositor writes to the pipe fd directly
 		_ = WaylandBindings.close(fds[1]);
-		_ = WaylandBindings.wl_display_flush(_wlDisplay);
+
+		// Blocking read — compositor writes data to the pipe asynchronously
 		var buf = new byte[65536];
 		var sb = new StringBuilder();
 		int n;
-		while ((n = Read(fds[0], buf, buf.Length)) > 0) { sb.Append(Encoding.UTF8.GetString(buf, 0, n)); }
+		while ((n = Read(fds[0], buf, buf.Length)) > 0)
+		{
+			sb.Append(Encoding.UTF8.GetString(buf, 0, n));
+		}
 		_ = WaylandBindings.close(fds[0]);
 		return sb.Length > 0 ? sb.ToString() : null;
 	}
@@ -288,4 +303,5 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	[DllImport("libc", EntryPoint = "pipe")] private static extern int Pipe(int[] fds);
 	[DllImport("libc", EntryPoint = "read")] private static extern int Read(int fd, byte[] buf, int count);
 	[DllImport("libc", EntryPoint = "write")] private static extern int Write(int fd, byte[] buf, int count);
+	[DllImport("libc", EntryPoint = "fcntl")] private static extern int Fcntl(int fd, int cmd, int arg);
 }
