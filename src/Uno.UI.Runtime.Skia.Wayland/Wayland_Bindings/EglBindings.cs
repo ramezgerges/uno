@@ -37,6 +37,9 @@ internal static partial class EglBindings
 	[LibraryImport(LibEGL, EntryPoint = "eglGetPlatformDisplay")]
 	internal static partial IntPtr eglGetPlatformDisplay(int platform, IntPtr nativeDisplay, IntPtr attribList);
 
+	[LibraryImport(LibEGL, EntryPoint = "eglGetPlatformDisplayEXT")]
+	internal static partial IntPtr eglGetPlatformDisplayEXT(int platform, IntPtr nativeDisplay, IntPtr attribList);
+
 	[LibraryImport(LibEGL, EntryPoint = "eglInitialize")]
 	[return: MarshalAs(UnmanagedType.Bool)]
 	internal static partial bool eglInitialize(IntPtr display, out int major, out int minor);

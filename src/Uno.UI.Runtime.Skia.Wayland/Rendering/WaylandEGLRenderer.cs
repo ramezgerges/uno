@@ -38,28 +38,50 @@ internal class WaylandEGLRenderer : WaylandRenderer, IDisposable
 			throw new InvalidOperationException($"eglBindAPI failed: {EglBindings.eglGetError()}");
 		}
 
-		// Get EGL display
-		_eglDisplay = EglBindings.eglGetPlatformDisplay(
-			EglBindings.EGL_PLATFORM_WAYLAND_KHR, wlDisplay, IntPtr.Zero);
+		// Get EGL display — try multiple approaches for compatibility.
+		// The order matters: some MESA versions only work with specific approaches.
+		_eglDisplay = IntPtr.Zero;
+		var eglError = 0;
 
-		if (_eglDisplay == IntPtr.Zero)
+		// Try each approach, init, and test if configs are available
+		foreach (var (label, getDisplay) in new (string, Func<IntPtr>)[]
 		{
-			// Fallback to eglGetDisplay
-			_eglDisplay = EglBindings.eglGetDisplay(wlDisplay);
+			("eglGetPlatformDisplay(WAYLAND)", () => EglBindings.eglGetPlatformDisplay(EglBindings.EGL_PLATFORM_WAYLAND_KHR, wlDisplay, IntPtr.Zero)),
+			("eglGetPlatformDisplayEXT(WAYLAND)", () => EglBindings.eglGetPlatformDisplayEXT(EglBindings.EGL_PLATFORM_WAYLAND_KHR, wlDisplay, IntPtr.Zero)),
+			("eglGetDisplay(wlDisplay)", () => EglBindings.eglGetDisplay(wlDisplay)),
+			("eglGetDisplay(DEFAULT)", () => EglBindings.eglGetDisplay(IntPtr.Zero)),
+		})
+		{
+			var display = getDisplay();
+			if (display == IntPtr.Zero)
+			{
+				continue;
+			}
+
+			if (!EglBindings.eglInitialize(display, out var maj, out var min))
+			{
+				continue;
+			}
+
+			// Test if this display actually has usable configs
+			var testAttribs = new[] { EglBindings.EGL_RENDERABLE_TYPE, EglBindings.EGL_OPENGL_ES2_BIT, EglBindings.EGL_NONE };
+			var testConfigs = new IntPtr[1];
+			if (EglBindings.eglChooseConfig(display, testAttribs, testConfigs, 1, out var testNum) && testNum > 0)
+			{
+				_eglDisplay = display;
+				this.LogInfo()?.Info($"EGL display via {label}, version {maj}.{min}, {testNum} config(s).");
+				break;
+			}
+
+			// This display has no usable configs, terminate and try next
+			EglBindings.eglTerminate(display);
 		}
 
 		if (_eglDisplay == IntPtr.Zero)
 		{
-			throw new InvalidOperationException($"eglGetDisplay failed: {EglBindings.eglGetError()}");
+			eglError = EglBindings.eglGetError();
+			throw new InvalidOperationException($"No usable EGL display found (last error: {eglError})");
 		}
-
-		// Initialize EGL
-		if (!EglBindings.eglInitialize(_eglDisplay, out var major, out var minor))
-		{
-			throw new InvalidOperationException($"eglInitialize failed: {EglBindings.eglGetError()}");
-		}
-
-		this.LogInfo()?.Info($"Found EGL version {major}.{minor}.");
 
 		// Choose EGL config
 		int[] configAttribs =
