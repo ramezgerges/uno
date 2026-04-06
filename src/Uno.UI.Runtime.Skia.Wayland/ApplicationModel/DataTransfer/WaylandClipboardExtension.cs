@@ -114,6 +114,12 @@ internal unsafe class WaylandClipboardExtension : IClipboardExtension
 				state.Manager, 1, WaylandInterfaces.wl_data_device_interface,
 				WaylandBindings.wl_proxy_get_version(state.Manager), 0,
 				IntPtr.Zero, state.Seat);
+			Console.Error.WriteLine($"[Clipboard] device={device}");
+			if (device == IntPtr.Zero)
+			{
+				regHandle.Free();
+				return null;
+			}
 
 			var deviceListener = new WlDataDeviceListener
 			{
@@ -125,7 +131,8 @@ internal unsafe class WaylandClipboardExtension : IClipboardExtension
 				selection = Marshal.GetFunctionPointerForDelegate(state.SelectionDel = state.OnSelection),
 			};
 			var devHandle = GCHandle.Alloc(deviceListener, GCHandleType.Pinned);
-			_ = WaylandBindings.wl_proxy_add_listener(device, devHandle.AddrOfPinnedObject(), IntPtr.Zero);
+			var addResult = WaylandBindings.wl_proxy_add_listener(device, devHandle.AddrOfPinnedObject(), IntPtr.Zero);
+			Console.Error.WriteLine($"[Clipboard] add_listener result={addResult}");
 
 			// Pre-create offer listener
 			var offerListener = new WlDataOfferListener
