@@ -171,14 +171,23 @@ internal class WaylandEGLRenderer : WaylandRenderer, IDisposable
 		var glInfo = new GRGlFramebufferInfo(DefaultFramebuffer, skColorType.ToGlSizedFormat());
 
 		_renderTarget = new GRBackendRenderTarget(width, height, _samples, _stencil, glInfo);
-		return SKSurface.Create(_grContext, _renderTarget, grSurfaceOrigin, skColorType);
+		var surface = SKSurface.Create(_grContext, _renderTarget, grSurfaceOrigin, skColorType);
+
+		if (surface == null)
+		{
+			// GRContext might be stale — reset and retry
+			_grContext.ResetContext();
+			surface = SKSurface.Create(_grContext, _renderTarget, grSurfaceOrigin, skColorType);
+		}
+
+		return surface!;
 	}
 
 	protected override void MakeCurrent()
 	{
-		var previousContext = EglHelper.EglGetCurrentContext();
-		var previousReadSurface = EglHelper.EglGetCurrentSurface(EglHelper.EGL_READ);
-		var previousDrawSurface = EglHelper.EglGetCurrentSurface(EglHelper.EGL_DRAW);
+		// Dispose previous context restoration if it wasn't flushed
+		_contextCurrentDisposable?.Dispose();
+		_contextCurrentDisposable = null;
 
 		if (!EglHelper.EglMakeCurrent(_eglDisplay, _eglSurface, _eglSurface, _eglContext))
 		{
@@ -186,17 +195,12 @@ internal class WaylandEGLRenderer : WaylandRenderer, IDisposable
 			{
 				this.Log().Error($"eglMakeCurrent failed: {Enum.GetName(EglHelper.EglGetError())}");
 			}
+			return;
 		}
 
 		_contextCurrentDisposable = Disposable.Create(() =>
 		{
-			if (!EglHelper.EglMakeCurrent(_eglDisplay, previousDrawSurface, previousReadSurface, previousContext))
-			{
-				if (this.Log().IsEnabled(LogLevel.Error))
-				{
-					this.Log().Error($"eglMakeCurrent (restore) failed: {Enum.GetName(EglHelper.EglGetError())}");
-				}
-			}
+			EglHelper.EglMakeCurrent(_eglDisplay, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
 		});
 	}
 

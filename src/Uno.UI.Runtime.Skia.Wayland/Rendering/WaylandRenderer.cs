@@ -45,11 +45,22 @@ internal abstract class WaylandRenderer : IDisposable
 		{
 			_surface?.Dispose();
 			_surface = UpdateSize((int)size.Width, (int)size.Height);
+			if (_surface == null)
+			{
+				if (this.Log().IsEnabled(LogLevel.Error))
+				{
+					this.Log().Error($"UpdateSize returned null surface for {size.Width}x{size.Height}");
+				}
+				return null!;
+			}
 			_surface.Canvas.Clear(_background);
 			return _surface.Canvas;
 		});
 
-		Flush();
+		if (_surface != null)
+		{
+			Flush();
+		}
 	}
 
 	protected abstract SKSurface UpdateSize(int width, int height);
