@@ -64,6 +64,23 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	private XdgToplevelWmCapabilitiesDelegate? _xdgToplevelWmCapabilitiesDelegate;
 	private WlSeatCapabilitiesDelegate? _seatCapabilitiesDelegate;
 	private WlSeatNameDelegate? _seatNameDelegate;
+	// Pointer listener delegates
+	private WlPointerEnterDelegate? _pointerEnterDelegate;
+	private WlPointerLeaveDelegate? _pointerLeaveDelegate;
+	private WlPointerMotionDelegate? _pointerMotionDelegate;
+	private WlPointerButtonDelegate? _pointerButtonDelegate;
+	private WlPointerAxisDelegate? _pointerAxisDelegate;
+	private WlPointerFrameDelegate? _pointerFrameDelegate;
+	private WlPointerAxisSourceDelegate? _pointerAxisSourceDelegate;
+	private WlPointerAxisStopDelegate? _pointerAxisStopDelegate;
+	private WlPointerAxisDiscreteDelegate? _pointerAxisDiscreteDelegate;
+	// Keyboard listener delegates
+	private WlKeyboardKeymapDelegate? _keyboardKeymapDelegate;
+	private WlKeyboardEnterDelegate? _keyboardEnterDelegate;
+	private WlKeyboardLeaveDelegate? _keyboardLeaveDelegate;
+	private WlKeyboardKeyDelegate? _keyboardKeyDelegate;
+	private WlKeyboardModifiersDelegate? _keyboardModifiersDelegate;
+	private WlKeyboardRepeatInfoDelegate? _keyboardRepeatInfoDelegate;
 
 	// Pinned listener structs
 	private GCHandle _registryListenerHandle;
@@ -71,6 +88,8 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	private GCHandle _xdgSurfaceListenerHandle;
 	private GCHandle _xdgToplevelListenerHandle;
 	private GCHandle _seatListenerHandle;
+	private GCHandle _pointerListenerHandle;
+	private GCHandle _keyboardListenerHandle;
 
 	internal WaylandXamlRootHost(WaylandWindowWrapper wrapper, Window window, XamlRoot xamlRoot)
 	{
@@ -481,13 +500,39 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 				seat, 0, WaylandInterfaces.wl_pointer_interface,
 				WaylandBindings.wl_proxy_get_version(seat), 0, IntPtr.Zero);
 
+			// Set up pointer listener
+			_pointerEnterDelegate = OnPointerEnter;
+			_pointerLeaveDelegate = OnPointerLeave;
+			_pointerMotionDelegate = OnPointerMotion;
+			_pointerButtonDelegate = OnPointerButton;
+			_pointerAxisDelegate = OnPointerAxis;
+			_pointerFrameDelegate = OnPointerFrame;
+			_pointerAxisSourceDelegate = OnPointerAxisSource;
+			_pointerAxisStopDelegate = OnPointerAxisStop;
+			_pointerAxisDiscreteDelegate = OnPointerAxisDiscrete;
+			var pointerListener = new WlPointerListener
+			{
+				enter = Marshal.GetFunctionPointerForDelegate(_pointerEnterDelegate),
+				leave = Marshal.GetFunctionPointerForDelegate(_pointerLeaveDelegate),
+				motion = Marshal.GetFunctionPointerForDelegate(_pointerMotionDelegate),
+				button = Marshal.GetFunctionPointerForDelegate(_pointerButtonDelegate),
+				axis = Marshal.GetFunctionPointerForDelegate(_pointerAxisDelegate),
+				frame = Marshal.GetFunctionPointerForDelegate(_pointerFrameDelegate),
+				axis_source = Marshal.GetFunctionPointerForDelegate(_pointerAxisSourceDelegate),
+				axis_stop = Marshal.GetFunctionPointerForDelegate(_pointerAxisStopDelegate),
+				axis_discrete = Marshal.GetFunctionPointerForDelegate(_pointerAxisDiscreteDelegate),
+			};
+			_pointerListenerHandle = GCHandle.Alloc(pointerListener, GCHandleType.Pinned);
+			_ = WaylandBindings.wl_proxy_add_listener(_wlPointer, _pointerListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
+
 			if (this.Log().IsEnabled(LogLevel.Debug))
 			{
-				this.Log().Debug($"Created wl_pointer: {_wlPointer}");
+				this.Log().Debug($"Created wl_pointer with listener: {_wlPointer}");
 			}
 		}
 		else if ((caps & WlSeatCapability.Pointer) == 0 && _wlPointer != IntPtr.Zero)
 		{
+			if (_pointerListenerHandle.IsAllocated) { _pointerListenerHandle.Free(); }
 			WaylandBindings.wl_proxy_destroy(_wlPointer);
 			_wlPointer = IntPtr.Zero;
 		}
@@ -500,13 +545,33 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 				seat, 1, WaylandInterfaces.wl_keyboard_interface,
 				WaylandBindings.wl_proxy_get_version(seat), 0, IntPtr.Zero);
 
+			// Set up keyboard listener
+			_keyboardKeymapDelegate = OnKeyboardKeymap;
+			_keyboardEnterDelegate = OnKeyboardEnter;
+			_keyboardLeaveDelegate = OnKeyboardLeave;
+			_keyboardKeyDelegate = OnKeyboardKey;
+			_keyboardModifiersDelegate = OnKeyboardModifiers;
+			_keyboardRepeatInfoDelegate = OnKeyboardRepeatInfo;
+			var keyboardListener = new WlKeyboardListener
+			{
+				keymap = Marshal.GetFunctionPointerForDelegate(_keyboardKeymapDelegate),
+				enter = Marshal.GetFunctionPointerForDelegate(_keyboardEnterDelegate),
+				leave = Marshal.GetFunctionPointerForDelegate(_keyboardLeaveDelegate),
+				key = Marshal.GetFunctionPointerForDelegate(_keyboardKeyDelegate),
+				modifiers = Marshal.GetFunctionPointerForDelegate(_keyboardModifiersDelegate),
+				repeat_info = Marshal.GetFunctionPointerForDelegate(_keyboardRepeatInfoDelegate),
+			};
+			_keyboardListenerHandle = GCHandle.Alloc(keyboardListener, GCHandleType.Pinned);
+			_ = WaylandBindings.wl_proxy_add_listener(_wlKeyboard, _keyboardListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
+
 			if (this.Log().IsEnabled(LogLevel.Debug))
 			{
-				this.Log().Debug($"Created wl_keyboard: {_wlKeyboard}");
+				this.Log().Debug($"Created wl_keyboard with listener: {_wlKeyboard}");
 			}
 		}
 		else if ((caps & WlSeatCapability.Keyboard) == 0 && _wlKeyboard != IntPtr.Zero)
 		{
+			if (_keyboardListenerHandle.IsAllocated) { _keyboardListenerHandle.Free(); }
 			WaylandBindings.wl_proxy_destroy(_wlKeyboard);
 			_wlKeyboard = IntPtr.Zero;
 		}
@@ -518,6 +583,73 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 		{
 			this.Log().Debug($"Seat name: {name}");
 		}
+	}
+
+	// --- Pointer event callbacks ---
+
+	private void OnPointerEnter(IntPtr data, IntPtr pointer, uint serial, IntPtr surface, int sx, int sy)
+	{
+		// Wayland sends fixed-point 24.8 coordinates for enter
+		_pointerSource?.ProcessPointerEnter(serial, sx / 256.0, sy / 256.0);
+	}
+
+	private void OnPointerLeave(IntPtr data, IntPtr pointer, uint serial, IntPtr surface)
+	{
+		_pointerSource?.ProcessPointerLeave(serial);
+	}
+
+	private void OnPointerMotion(IntPtr data, IntPtr pointer, uint time, int sx, int sy)
+	{
+		// Wayland sends fixed-point 24.8 coordinates for motion
+		_pointerSource?.ProcessPointerMotion(time, sx / 256.0, sy / 256.0);
+	}
+
+	private void OnPointerButton(IntPtr data, IntPtr pointer, uint serial, uint time, uint button, uint state)
+	{
+		_pointerSource?.ProcessPointerButton(serial, time, button, state);
+	}
+
+	private void OnPointerAxis(IntPtr data, IntPtr pointer, uint time, uint axis, int value)
+	{
+		// value is fixed-point 24.8
+		_pointerSource?.ProcessPointerAxis(time, axis, value / 256.0);
+	}
+
+	private void OnPointerFrame(IntPtr data, IntPtr pointer) { }
+	private void OnPointerAxisSource(IntPtr data, IntPtr pointer, uint axisSource) { }
+	private void OnPointerAxisStop(IntPtr data, IntPtr pointer, uint time, uint axis) { }
+	private void OnPointerAxisDiscrete(IntPtr data, IntPtr pointer, uint axis, int discrete) { }
+
+	// --- Keyboard event callbacks ---
+
+	private void OnKeyboardKeymap(IntPtr data, IntPtr keyboard, uint format, int fd, uint size)
+	{
+		_keyboardSource?.ProcessKeymapEvent(fd, size);
+	}
+
+	private void OnKeyboardEnter(IntPtr data, IntPtr keyboard, uint serial, IntPtr surface, IntPtr keys)
+	{
+		// Keyboard focus entered our surface
+	}
+
+	private void OnKeyboardLeave(IntPtr data, IntPtr keyboard, uint serial, IntPtr surface)
+	{
+		// Keyboard focus left our surface
+	}
+
+	private void OnKeyboardKey(IntPtr data, IntPtr keyboard, uint serial, uint time, uint key, uint state)
+	{
+		_keyboardSource?.ProcessKeyEvent(key, state, serial);
+	}
+
+	private void OnKeyboardModifiers(IntPtr data, IntPtr keyboard, uint serial, uint modsDepressed, uint modsLatched, uint modsLocked, uint group)
+	{
+		_keyboardSource?.ProcessModifiers(modsDepressed, modsLatched, modsLocked, group);
+	}
+
+	private void OnKeyboardRepeatInfo(IntPtr data, IntPtr keyboard, int rate, int delay)
+	{
+		// Key repeat rate and delay — can be used for implementing key repeat
 	}
 
 	// --- Static helpers ---
