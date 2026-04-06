@@ -81,6 +81,8 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	private WlPointerAxisSourceDelegate? _pointerAxisSourceDelegate;
 	private WlPointerAxisStopDelegate? _pointerAxisStopDelegate;
 	private WlPointerAxisDiscreteDelegate? _pointerAxisDiscreteDelegate;
+	private WlPointerAxisValue120Delegate? _pointerAxisValue120Delegate;
+	private WlPointerAxisRelativeDirectionDelegate? _pointerAxisRelativeDirectionDelegate;
 	// Keyboard listener delegates
 	private WlKeyboardKeymapDelegate? _keyboardKeymapDelegate;
 	private WlKeyboardEnterDelegate? _keyboardEnterDelegate;
@@ -601,6 +603,8 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 			_pointerAxisSourceDelegate = OnPointerAxisSource;
 			_pointerAxisStopDelegate = OnPointerAxisStop;
 			_pointerAxisDiscreteDelegate = OnPointerAxisDiscrete;
+			_pointerAxisValue120Delegate = OnPointerAxisValue120;
+			_pointerAxisRelativeDirectionDelegate = OnPointerAxisRelativeDirection;
 			var pointerListener = new WlPointerListener
 			{
 				enter = Marshal.GetFunctionPointerForDelegate(_pointerEnterDelegate),
@@ -612,6 +616,8 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 				axis_source = Marshal.GetFunctionPointerForDelegate(_pointerAxisSourceDelegate),
 				axis_stop = Marshal.GetFunctionPointerForDelegate(_pointerAxisStopDelegate),
 				axis_discrete = Marshal.GetFunctionPointerForDelegate(_pointerAxisDiscreteDelegate),
+				axis_value120 = Marshal.GetFunctionPointerForDelegate(_pointerAxisValue120Delegate),
+				axis_relative_direction = Marshal.GetFunctionPointerForDelegate(_pointerAxisRelativeDirectionDelegate),
 			};
 			_pointerListenerHandle = GCHandle.Alloc(pointerListener, GCHandleType.Pinned);
 			_ = WaylandBindings.wl_proxy_add_listener(_wlPointer, _pointerListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
@@ -756,6 +762,8 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	private void OnPointerAxisSource(IntPtr data, IntPtr pointer, uint axisSource) { }
 	private void OnPointerAxisStop(IntPtr data, IntPtr pointer, uint time, uint axis) { }
 	private void OnPointerAxisDiscrete(IntPtr data, IntPtr pointer, uint axis, int discrete) { }
+	private void OnPointerAxisValue120(IntPtr data, IntPtr pointer, uint axis, int value120) { }
+	private void OnPointerAxisRelativeDirection(IntPtr data, IntPtr pointer, uint axis, uint direction) { }
 
 	// --- Keyboard event callbacks ---
 

@@ -83,18 +83,26 @@ internal delegate void WlPointerAxisStopDelegate(IntPtr data, IntPtr pointer, ui
 [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
 internal delegate void WlPointerAxisDiscreteDelegate(IntPtr data, IntPtr pointer, uint axis, int discrete);
 
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+internal delegate void WlPointerAxisValue120Delegate(IntPtr data, IntPtr pointer, uint axis, int value120);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+internal delegate void WlPointerAxisRelativeDirectionDelegate(IntPtr data, IntPtr pointer, uint axis, uint direction);
+
 [StructLayout(LayoutKind.Sequential)]
 internal struct WlPointerListener
 {
-	public IntPtr enter;
-	public IntPtr leave;
-	public IntPtr motion;
-	public IntPtr button;
-	public IntPtr axis;
-	public IntPtr frame;
-	public IntPtr axis_source;
-	public IntPtr axis_stop;
-	public IntPtr axis_discrete;
+	public IntPtr enter;                    // v1
+	public IntPtr leave;                    // v1
+	public IntPtr motion;                   // v1
+	public IntPtr button;                   // v1
+	public IntPtr axis;                     // v1
+	public IntPtr frame;                    // v5
+	public IntPtr axis_source;              // v5
+	public IntPtr axis_stop;                // v5
+	public IntPtr axis_discrete;            // v5
+	public IntPtr axis_value120;            // v8
+	public IntPtr axis_relative_direction;  // v9
 }
 
 // Delegates for wl_keyboard listener
