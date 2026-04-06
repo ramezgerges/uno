@@ -38,6 +38,8 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	private IntPtr _xdgDecorationManager;
 	private IntPtr _cursorShapeManager;
 	private IntPtr _cursorShapeDevice;
+	private IntPtr _wlTouch;
+	private IntPtr _wlOutput;
 	private IntPtr _wlSurface;
 	private IntPtr _xdgSurface;
 	private IntPtr _xdgToplevel;
@@ -83,6 +85,19 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	private WlKeyboardKeyDelegate? _keyboardKeyDelegate;
 	private WlKeyboardModifiersDelegate? _keyboardModifiersDelegate;
 	private WlKeyboardRepeatInfoDelegate? _keyboardRepeatInfoDelegate;
+	// Touch listener delegates
+	private WlTouchDownDelegate? _touchDownDelegate;
+	private WlTouchUpDelegate? _touchUpDelegate;
+	private WlTouchMotionDelegate? _touchMotionDelegate;
+	private WlTouchFrameDelegate? _touchFrameDelegate;
+	private WlTouchCancelDelegate? _touchCancelDelegate;
+	// Output listener delegates
+	private WlOutputGeometryDelegate? _outputGeometryDelegate;
+	private WlOutputModeDelegate? _outputModeDelegate;
+	private WlOutputDoneDelegate? _outputDoneDelegate;
+	private WlOutputScaleDelegate? _outputScaleDelegate;
+	private WlOutputNameDelegate? _outputNameDelegate;
+	private WlOutputDescriptionDelegate? _outputDescriptionDelegate;
 
 	// Pinned listener structs
 	private GCHandle _registryListenerHandle;
@@ -92,6 +107,8 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	private GCHandle _seatListenerHandle;
 	private GCHandle _pointerListenerHandle;
 	private GCHandle _keyboardListenerHandle;
+	private GCHandle _touchListenerHandle;
+	private GCHandle _outputListenerHandle;
 
 	internal WaylandXamlRootHost(WaylandWindowWrapper wrapper, Window window, XamlRoot xamlRoot)
 	{
@@ -433,6 +450,27 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 			case "wp_cursor_shape_manager_v1":
 				_cursorShapeManager = WaylandBindings.wl_registry_bind_with_name(registry, name, "wp_cursor_shape_manager_v1", Math.Min(version, 1u));
 				break;
+			case "wl_output":
+				_wlOutput = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.wl_output_interface, Math.Min(version, 4u));
+				// Set up output listener to receive scale factor events
+				_outputGeometryDelegate = OnOutputGeometry;
+				_outputModeDelegate = OnOutputMode;
+				_outputDoneDelegate = OnOutputDone;
+				_outputScaleDelegate = OnOutputScale;
+				_outputNameDelegate = OnOutputName;
+				_outputDescriptionDelegate = OnOutputDescription;
+				var outputListener = new WlOutputListener
+				{
+					geometry = Marshal.GetFunctionPointerForDelegate(_outputGeometryDelegate),
+					mode = Marshal.GetFunctionPointerForDelegate(_outputModeDelegate),
+					done = Marshal.GetFunctionPointerForDelegate(_outputDoneDelegate),
+					scale = Marshal.GetFunctionPointerForDelegate(_outputScaleDelegate),
+					name = Marshal.GetFunctionPointerForDelegate(_outputNameDelegate),
+					description = Marshal.GetFunctionPointerForDelegate(_outputDescriptionDelegate),
+				};
+				_outputListenerHandle = GCHandle.Alloc(outputListener, GCHandleType.Pinned);
+				_ = WaylandBindings.wl_proxy_add_listener(_wlOutput, _outputListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
+				break;
 			case "xdg_wm_base":
 				_xdgWmBase = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.xdg_wm_base_interface, Math.Min(version, 4u));
 				// Set up xdg_wm_base listener (for ping)
@@ -605,6 +643,43 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 			WaylandBindings.wl_proxy_destroy(_wlKeyboard);
 			_wlKeyboard = IntPtr.Zero;
 		}
+
+		// Touch
+		if ((caps & WlSeatCapability.Touch) != 0 && _wlTouch == IntPtr.Zero)
+		{
+			// wl_seat.get_touch opcode = 2
+			_wlTouch = WaylandBindings.wl_proxy_marshal_flags(
+				seat, 2, WaylandInterfaces.wl_touch_interface,
+				WaylandBindings.wl_proxy_get_version(seat), 0, IntPtr.Zero);
+
+			// Set up touch listener (down, up, motion, frame, cancel)
+			_touchDownDelegate = OnTouchDown;
+			_touchUpDelegate = OnTouchUp;
+			_touchMotionDelegate = OnTouchMotion;
+			_touchFrameDelegate = OnTouchFrame;
+			_touchCancelDelegate = OnTouchCancel;
+			var touchListener = new WlTouchListener
+			{
+				down = Marshal.GetFunctionPointerForDelegate(_touchDownDelegate),
+				up = Marshal.GetFunctionPointerForDelegate(_touchUpDelegate),
+				motion = Marshal.GetFunctionPointerForDelegate(_touchMotionDelegate),
+				frame = Marshal.GetFunctionPointerForDelegate(_touchFrameDelegate),
+				cancel = Marshal.GetFunctionPointerForDelegate(_touchCancelDelegate),
+			};
+			_touchListenerHandle = GCHandle.Alloc(touchListener, GCHandleType.Pinned);
+			_ = WaylandBindings.wl_proxy_add_listener(_wlTouch, _touchListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
+
+			if (this.Log().IsEnabled(LogLevel.Debug))
+			{
+				this.Log().Debug($"Created wl_touch with listener: {_wlTouch}");
+			}
+		}
+		else if ((caps & WlSeatCapability.Touch) == 0 && _wlTouch != IntPtr.Zero)
+		{
+			if (_touchListenerHandle.IsAllocated) { _touchListenerHandle.Free(); }
+			WaylandBindings.wl_proxy_destroy(_wlTouch);
+			_wlTouch = IntPtr.Zero;
+		}
 	}
 
 	private void OnSeatName(IntPtr data, IntPtr seat, string name)
@@ -682,6 +757,96 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 		// Key repeat rate and delay — can be used for implementing key repeat
 	}
 
+	// --- Output event callbacks ---
+
+	private void OnOutputGeometry(IntPtr data, IntPtr output, int x, int y, int physicalWidth, int physicalHeight, int subpixel, string make, string model, int transform)
+	{
+		// Informational — physical dimensions and manufacturer
+	}
+
+	private void OnOutputMode(IntPtr data, IntPtr output, uint flags, int width, int height, int refresh)
+	{
+		// Mode information — resolution and refresh rate
+	}
+
+	private void OnOutputDone(IntPtr data, IntPtr output)
+	{
+		// All output properties have been sent
+	}
+
+	private void OnOutputScale(IntPtr data, IntPtr output, int factor)
+	{
+		if (this.Log().IsEnabled(LogLevel.Information))
+		{
+			this.Log().Info($"Output scale factor: {factor}");
+		}
+
+		// Update the display scale if no environment override is set
+		if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("UNO_DISPLAY_SCALE_OVERRIDE")))
+		{
+			WaylandDisplayInformationExtension.SetOutputScale(factor);
+		}
+	}
+
+	private void OnOutputName(IntPtr data, IntPtr output, string name)
+	{
+		if (this.Log().IsEnabled(LogLevel.Debug))
+		{
+			this.Log().Debug($"Output name: {name}");
+		}
+	}
+
+	private void OnOutputDescription(IntPtr data, IntPtr output, string description)
+	{
+		if (this.Log().IsEnabled(LogLevel.Debug))
+		{
+			this.Log().Debug($"Output description: {description}");
+		}
+	}
+
+	// --- Touch event callbacks ---
+
+	private void OnTouchDown(IntPtr data, IntPtr touch, uint serial, uint time, IntPtr surface, int id, int x, int y)
+	{
+		// Touch down — coordinates are fixed-point 24.8
+		if (this.Log().IsEnabled(LogLevel.Trace))
+		{
+			this.Log().Trace($"Touch down: id={id} x={x / 256.0} y={y / 256.0}");
+		}
+	}
+
+	private void OnTouchUp(IntPtr data, IntPtr touch, uint serial, uint time, int id)
+	{
+		// Touch up
+		if (this.Log().IsEnabled(LogLevel.Trace))
+		{
+			this.Log().Trace($"Touch up: id={id}");
+		}
+	}
+
+	private void OnTouchMotion(IntPtr data, IntPtr touch, uint time, int id, int x, int y)
+	{
+		// Touch motion — coordinates are fixed-point 24.8
+		if (this.Log().IsEnabled(LogLevel.Trace))
+		{
+			this.Log().Trace($"Touch motion: id={id} x={x / 256.0} y={y / 256.0}");
+		}
+	}
+
+	private void OnTouchFrame(IntPtr data, IntPtr touch)
+	{
+		// Touch frame — indicates end of a group of touch events
+	}
+
+	private void OnTouchCancel(IntPtr data, IntPtr touch)
+	{
+		// Touch cancelled by compositor
+		if (this.Log().IsEnabled(LogLevel.Debug))
+		{
+			this.Log().Debug("Touch cancelled");
+		}
+	}
+
 	// --- Static helpers ---
 
 	internal static WaylandXamlRootHost? GetHostFromWindow(Window window)
@@ -718,6 +883,14 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 			{
 				WaylandBindings.wl_proxy_destroy(_wlKeyboard);
 			}
+			if (_wlTouch != IntPtr.Zero)
+			{
+				WaylandBindings.wl_proxy_destroy(_wlTouch);
+			}
+			if (_wlOutput != IntPtr.Zero)
+			{
+				WaylandBindings.wl_proxy_destroy(_wlOutput);
+			}
 			if (_xdgToplevel != IntPtr.Zero)
 			{
 				WaylandBindings.wl_proxy_destroy(_xdgToplevel);
@@ -744,6 +917,8 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 			if (_xdgSurfaceListenerHandle.IsAllocated) { _xdgSurfaceListenerHandle.Free(); }
 			if (_xdgToplevelListenerHandle.IsAllocated) { _xdgToplevelListenerHandle.Free(); }
 			if (_seatListenerHandle.IsAllocated) { _seatListenerHandle.Free(); }
+			if (_touchListenerHandle.IsAllocated) { _touchListenerHandle.Free(); }
+			if (_outputListenerHandle.IsAllocated) { _outputListenerHandle.Free(); }
 
 			_closedTcs.TrySetResult();
 		}

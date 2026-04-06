@@ -91,7 +91,7 @@
 
 - [x] T029 [US2] Update `WaylandHostBuilder.IsSupported` in `src/Uno.UI.Runtime.Skia.Wayland/Builder/WaylandHostBuilder.cs` — add check for `UNO_PLATFORM_BACKEND` env var: if set to `x11` return false, if set to `wayland` return true, otherwise fall back to `WAYLAND_DISPLAY` check. Also validate the connection actually succeeds by attempting `wl_display_connect(null)` and disconnecting
 - [x] T030 [US2] Ensure `UseWayland()` is placed before `UseX11()` in `src/SamplesApp/SamplesApp.Skia.Generic/Program.cs` builder chain so Wayland is tried first when both are available
-- [ ] T031 [US2] Validate: test with `WAYLAND_DISPLAY` set → Wayland selected; unset `WAYLAND_DISPLAY`, set `DISPLAY` → X11 selected; set `UNO_PLATFORM_BACKEND=x11` with both env vars → X11 selected
+- [x] T031 [US2] Validate: test with `WAYLAND_DISPLAY` set → Wayland selected; unset `WAYLAND_DISPLAY`, set `DISPLAY` → X11 selected; set `UNO_PLATFORM_BACKEND=x11` with both env vars → X11 selected
 
 **Checkpoint**: Automatic platform detection works correctly with proper priority and override
 
@@ -110,7 +110,7 @@
 - [x] T034 [US1] Create VirtualKey mapping in `src/Uno.UI.Runtime.Skia.Wayland/Wayland_Bindings/WaylandKeyTransform.cs` — map xkb keysyms to Uno `VirtualKey` enum values, following the pattern in `src/Uno.UI.Runtime.Skia.X11/X11_Bindings/x11bindings_X11KeyTransform.cs`
 - [x] T035 [US1] Register input source extensions in `WaylandApplicationHost` static constructor in `src/Uno.UI.Runtime.Skia.Wayland/Hosting/WaylandApplicationHost.cs` — add `ApiExtensibility.Register<IXamlRootHost>(typeof(IUnoCorePointerInputSource), o => new WaylandPointerInputSource(o))` and same for `IUnoKeyboardInputSource`
 - [x] T036 [US1] Wire `wl_seat` capability changes to create/destroy pointer and keyboard objects in `WaylandXamlRootHost` — listen for `wl_seat.capabilities` event, create `wl_pointer` when `WL_SEAT_CAPABILITY_POINTER` is present, create `wl_keyboard` when `WL_SEAT_CAPABILITY_KEYBOARD` is present
-- [ ] T037 [US1] Validate: run SamplesApp on Wayland, click buttons (pointer events fire), type in a TextBox (keyboard events fire), scroll with mouse wheel (scroll events fire)
+- [x] T037 [US1] Validate: run SamplesApp on Wayland, click buttons (pointer events fire), type in a TextBox (keyboard events fire), scroll with mouse wheel (scroll events fire)
 
 **Checkpoint**: Full P1 — the app renders AND accepts input on Wayland
 
@@ -141,10 +141,10 @@
 
 ### Implementation for User Story 1 (DPI)
 
-- [ ] T042 [P] [US1] Create fractional scale bindings in `src/Uno.UI.Runtime.Skia.Wayland/Wayland_Bindings/WpFractionalScaleBindings.cs` — P/Invoke for `wp_fractional_scale_manager_v1` and `wp_fractional_scale_v1` interfaces, listener for `preferred_scale` event
-- [ ] T043 [P] [US1] Create viewporter bindings in `src/Uno.UI.Runtime.Skia.Wayland/Wayland_Bindings/WpViewporterBindings.cs` — P/Invoke for `wp_viewporter` and `wp_viewport` interfaces, `set_destination` and `set_source` requests
-- [ ] T044 [US1] Update `WaylandXamlRootHost` and `WaylandWindowWrapper` in their respective files — bind `wp_fractional_scale_manager_v1` from registry if available, attach `wp_fractional_scale_v1` to each surface, listen for `preferred_scale` event. Apply scale to buffer size (render at `width * scale × height * scale`), set `wp_viewport` destination to logical size. Fall back to `wl_output.scale` (integer) if fractional scale protocol unavailable. Update `RasterizationScale` on `WaylandWindowWrapper` when scale changes
-- [ ] T045 [US1] Update `WaylandDisplayInformationExtension` in `src/Uno.UI.Runtime.Skia.Wayland/Graphics/Display/WaylandDisplayInformationExtension.cs` — incorporate fractional scale into `RawPixelsPerViewPixel` when available
+- [x] T042 [P] [US1] Create fractional scale bindings in `src/Uno.UI.Runtime.Skia.Wayland/Wayland_Bindings/WpFractionalScaleBindings.cs` — P/Invoke for `wp_fractional_scale_manager_v1` and `wp_fractional_scale_v1` interfaces, listener for `preferred_scale` event
+- [x] T043 [P] [US1] Create viewporter bindings in `src/Uno.UI.Runtime.Skia.Wayland/Wayland_Bindings/WpViewporterBindings.cs` — P/Invoke for `wp_viewporter` and `wp_viewport` interfaces, `set_destination` and `set_source` requests
+- [x] T044 [US1] Update `WaylandXamlRootHost` and `WaylandWindowWrapper` in their respective files — bind `wp_fractional_scale_manager_v1` from registry if available, attach `wp_fractional_scale_v1` to each surface, listen for `preferred_scale` event. Apply scale to buffer size (render at `width * scale × height * scale`), set `wp_viewport` destination to logical size. Fall back to `wl_output.scale` (integer) if fractional scale protocol unavailable. Update `RasterizationScale` on `WaylandWindowWrapper` when scale changes
+- [x] T045 [US1] Update `WaylandDisplayInformationExtension` in `src/Uno.UI.Runtime.Skia.Wayland/Graphics/Display/WaylandDisplayInformationExtension.cs` — incorporate fractional scale into `RawPixelsPerViewPixel` when available
 - [ ] T046 [US1] Validate: run with Weston `--scale=2`, verify text is crisp and UI is at correct size. Test with fractional scale if compositor supports it
 
 **Checkpoint**: Complete User Story 1 — app renders correctly at all scale factors with GPU acceleration and full input
@@ -175,8 +175,8 @@
 
 ### Implementation for User Story 4
 
-- [ ] T050 [US4] Update `WaylandXamlRootHost` in `src/Uno.UI.Runtime.Skia.Wayland/Hosting/WaylandXamlRootHost.cs` — ensure each new `WaylandWindowWrapper` creates its own `wl_surface` + `xdg_surface` + `xdg_toplevel`, with independent renderer instance and frame callback. Track all hosts in the static `ConcurrentDictionary`. Route input events to the correct host based on `wl_pointer.enter`/`wl_keyboard.enter` surface matching
-- [ ] T051 [US4] Update `WaylandWindowWrapper.CloseCore()` in `src/Uno.UI.Runtime.Skia.Wayland/UI/Xaml/Window/WaylandWindowWrapper.cs` — destroy only this window's Wayland objects, remove from host tracking dictionary, fire `Closing` event with cancellation support
+- [x] T050 [US4] Update `WaylandXamlRootHost` in `src/Uno.UI.Runtime.Skia.Wayland/Hosting/WaylandXamlRootHost.cs` — ensure each new `WaylandWindowWrapper` creates its own `wl_surface` + `xdg_surface` + `xdg_toplevel`, with independent renderer instance and frame callback. Track all hosts in the static `ConcurrentDictionary`. Route input events to the correct host based on `wl_pointer.enter`/`wl_keyboard.enter` surface matching
+- [x] T051 [US4] Update `WaylandWindowWrapper.CloseCore()` in `src/Uno.UI.Runtime.Skia.Wayland/UI/Xaml/Window/WaylandWindowWrapper.cs` — destroy only this window's Wayland objects, remove from host tracking dictionary, fire `Closing` event with cancellation support
 - [ ] T052 [US4] Validate: open multiple windows in SamplesApp, interact with each independently, close one and verify the other continues working
 
 **Checkpoint**: Multi-window works correctly
@@ -223,8 +223,8 @@
 
 ### Implementation for User Story 7
 
-- [ ] T059 [US7] Create `WaylandTouchInputSource` integration in `src/Uno.UI.Runtime.Skia.Wayland/Devices/Input/WaylandTouchInputSource.cs` — set up `wl_touch` listener with handlers for `down`, `up`, `motion`, `cancel`, `frame` events. Map touch events to Uno pointer events with `PointerDeviceType.Touch`. Track active touch points by id. Dispatch `PointerPressed` on `down`, `PointerMoved` on `motion`, `PointerReleased` on `up`, `PointerCancelled` on `cancel`
-- [ ] T060 [US7] Update `WaylandXamlRootHost` seat capability handling in `src/Uno.UI.Runtime.Skia.Wayland/Hosting/WaylandXamlRootHost.cs` — create `wl_touch` when `WL_SEAT_CAPABILITY_TOUCH` is present, wire to touch input source
+- [x] T059 [US7] Create `WaylandTouchInputSource` integration in `src/Uno.UI.Runtime.Skia.Wayland/Devices/Input/WaylandTouchInputSource.cs` — set up `wl_touch` listener with handlers for `down`, `up`, `motion`, `cancel`, `frame` events. Map touch events to Uno pointer events with `PointerDeviceType.Touch`. Track active touch points by id. Dispatch `PointerPressed` on `down`, `PointerMoved` on `motion`, `PointerReleased` on `up`, `PointerCancelled` on `cancel`
+- [x] T060 [US7] Update `WaylandXamlRootHost` seat capability handling in `src/Uno.UI.Runtime.Skia.Wayland/Hosting/WaylandXamlRootHost.cs` — create `wl_touch` when `WL_SEAT_CAPABILITY_TOUCH` is present, wire to touch input source
 - [ ] T061 [US7] Validate: on touch-enabled device, tap buttons and scroll — verify touch input works
 
 **Checkpoint**: Touch input works
@@ -251,11 +251,11 @@
 
 **Purpose**: Final integration, error handling, and cross-story improvements
 
-- [ ] T065 Handle Wayland display disconnect gracefully in `src/Uno.UI.Runtime.Skia.Wayland/Hosting/WaylandXamlRootHost.cs` — detect `wl_display_dispatch()` returning -1 (connection lost), log error, exit cleanly
-- [ ] T066 Add logging throughout the Wayland target — use `Uno.Foundation.Logging` to log compositor capabilities, renderer selection, protocol negotiations, and errors. Add at minimum to `WaylandApplicationHost`, `WaylandXamlRootHost`, renderer classes
-- [ ] T067 Ensure all `IDisposable` implementations properly clean up Wayland protocol objects — audit all classes with `IntPtr` handles for proper cleanup in `Dispose()` and finalizers
-- [ ] T068 Update existing X11 unit tests to verify no regressions — run `dotnet test src/Uno.UI/Uno.UI.Tests.csproj` and ensure all tests pass
-- [ ] T069 Validate full end-to-end: build and run SamplesApp on headless Weston, verify rendering, input, clipboard, cursor changes, and window lifecycle all work without errors
+- [x] T065 Handle Wayland display disconnect gracefully in `src/Uno.UI.Runtime.Skia.Wayland/Hosting/WaylandXamlRootHost.cs` — detect `wl_display_dispatch()` returning -1 (connection lost), log error, exit cleanly
+- [x] T066 Add logging throughout the Wayland target — use `Uno.Foundation.Logging` to log compositor capabilities, renderer selection, protocol negotiations, and errors. Add at minimum to `WaylandApplicationHost`, `WaylandXamlRootHost`, renderer classes
+- [x] T067 Ensure all `IDisposable` implementations properly clean up Wayland protocol objects — audit all classes with `IntPtr` handles for proper cleanup in `Dispose()` and finalizers
+- [x] T068 Update existing X11 unit tests to verify no regressions — run `dotnet test src/Uno.UI/Uno.UI.Tests.csproj` and ensure all tests pass
+- [x] T069 Validate full end-to-end: build and run SamplesApp on headless Weston, verify rendering, input, clipboard, cursor changes, and window lifecycle all work without errors
 
 ---
 
