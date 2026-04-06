@@ -32,20 +32,24 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	private IntPtr _wlCompositor;
 	private IntPtr _wlShm;
 	private IntPtr _wlSeat;
+	private IntPtr _wlPointer;
+	private IntPtr _wlKeyboard;
 	private IntPtr _xdgWmBase;
+	private IntPtr _xdgDecorationManager;
 	private IntPtr _wlSurface;
 	private IntPtr _xdgSurface;
 	private IntPtr _xdgToplevel;
 
-	// Render thread
+	// Render thread + event thread
 	private WaylandRenderer? _renderer;
 	private Thread? _renderThread;
+	private Thread? _eventThread;
 	private volatile bool _renderLoopRunning = true;
 
 	// Window state
 	private int _width;
 	private int _height;
-#pragma warning disable CS0414 // Field is assigned but its value is never used
+#pragma warning disable CS0414
 	private bool _configured;
 #pragma warning restore CS0414
 
@@ -58,12 +62,15 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	private XdgToplevelCloseDelegate? _xdgToplevelCloseDelegate;
 	private XdgToplevelConfigureBoundsDelegate? _xdgToplevelConfigureBoundsDelegate;
 	private XdgToplevelWmCapabilitiesDelegate? _xdgToplevelWmCapabilitiesDelegate;
+	private WlSeatCapabilitiesDelegate? _seatCapabilitiesDelegate;
+	private WlSeatNameDelegate? _seatNameDelegate;
 
 	// Pinned listener structs
 	private GCHandle _registryListenerHandle;
 	private GCHandle _xdgWmBaseListenerHandle;
 	private GCHandle _xdgSurfaceListenerHandle;
 	private GCHandle _xdgToplevelListenerHandle;
+	private GCHandle _seatListenerHandle;
 
 	internal WaylandXamlRootHost(WaylandWindowWrapper wrapper, Window window, XamlRoot xamlRoot)
 	{
@@ -80,6 +87,14 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 		_firstWindowCreated = true;
 
 		XamlRootMap.Register(xamlRoot, this);
+
+		// Start event dispatch thread (reads from Wayland socket and processes events)
+		_eventThread = new Thread(EventLoop)
+		{
+			IsBackground = true,
+			Name = "WaylandEventThread",
+		};
+		_eventThread.Start();
 
 		// Start render thread
 		_renderThread = new Thread(RenderLoop)
@@ -194,6 +209,25 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 		SetToplevelString(XdgShell.XDG_TOPLEVEL_SET_APP_ID, "uno-platform");
 		SetToplevelString(XdgShell.XDG_TOPLEVEL_SET_TITLE, "Uno Platform");
 
+		// Request server-side decorations if the decoration manager is available
+		if (_xdgDecorationManager != IntPtr.Zero)
+		{
+			// zxdg_decoration_manager_v1.get_toplevel_decoration opcode = 1, args: new_id, toplevel
+			var decoration = WaylandBindings.wl_proxy_marshal_flags(
+				_xdgDecorationManager, XdgDecoration.ZXDG_DECORATION_MANAGER_V1_GET_TOPLEVEL_DECORATION,
+				IntPtr.Zero, WaylandBindings.wl_proxy_get_version(_xdgDecorationManager), 0,
+				IntPtr.Zero, _xdgToplevel);
+
+			if (decoration != IntPtr.Zero)
+			{
+				// zxdg_toplevel_decoration_v1.set_mode opcode = 1, args: mode (2 = server_side)
+				WaylandBindings.wl_proxy_marshal_flags(
+					decoration, XdgDecoration.ZXDG_TOPLEVEL_DECORATION_V1_SET_MODE,
+					IntPtr.Zero, WaylandBindings.wl_proxy_get_version(decoration), 0,
+					(uint)XdgDecorationMode.ServerSide);
+			}
+		}
+
 		// Initial commit to get the first configure event
 		// wl_surface.commit opcode = 6
 		WaylandBindings.wl_proxy_marshal_flags(
@@ -243,6 +277,46 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 		_renderEvent.Set();
 	}
 
+	private unsafe void EventLoop()
+	{
+		var fd = WaylandBindings.wl_display_get_fd(_wlDisplay);
+		var pollFd = new PollFd { fd = fd, events = WaylandBindings.POLLIN, revents = 0 };
+
+		while (_renderLoopRunning && !_closedTcs.Task.IsCompleted)
+		{
+			// Flush outgoing requests
+			_ = WaylandBindings.wl_display_flush(_wlDisplay);
+
+			// Poll for incoming events (100ms timeout to check shutdown)
+			pollFd.revents = 0;
+			var ret = WaylandBindings.poll(&pollFd, 1, 100);
+
+			if (!_renderLoopRunning || _closedTcs.Task.IsCompleted)
+			{
+				break;
+			}
+
+			if (ret > 0)
+			{
+				// Read and dispatch events from the Wayland socket
+				if (WaylandBindings.wl_display_dispatch(_wlDisplay) < 0)
+				{
+					if (this.Log().IsEnabled(LogLevel.Error))
+					{
+						this.Log().Error("Wayland display dispatch error");
+					}
+					break;
+				}
+				// Trigger a render after processing events
+				_renderEvent.Set();
+			}
+			else if (ret < 0)
+			{
+				break; // poll error
+			}
+		}
+	}
+
 	private void RenderLoop()
 	{
 		var stopwatch = Stopwatch.StartNew();
@@ -257,9 +331,8 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 				break;
 			}
 
-			// Dispatch pending Wayland events
+			// Process any pending events (non-blocking)
 			_ = WaylandBindings.wl_display_dispatch_pending(_wlDisplay);
-			_ = WaylandBindings.wl_display_flush(_wlDisplay);
 
 			var frameStart = stopwatch.Elapsed.TotalMilliseconds;
 
@@ -274,6 +347,9 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 					this.Log().Error($"Render error: {ex.Message}");
 				}
 			}
+
+			// Flush after render (sends the surface commit)
+			_ = WaylandBindings.wl_display_flush(_wlDisplay);
 
 			var elapsed = stopwatch.Elapsed.TotalMilliseconds - frameStart;
 			var remaining = targetInterval - elapsed;
@@ -303,6 +379,19 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 				break;
 			case "wl_seat":
 				_wlSeat = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.wl_seat_interface, Math.Min(version, 5u));
+				// Set up seat listener to track capabilities (pointer, keyboard, touch)
+				_seatCapabilitiesDelegate = OnSeatCapabilities;
+				_seatNameDelegate = OnSeatName;
+				var seatListener = new WlSeatListener
+				{
+					capabilities = Marshal.GetFunctionPointerForDelegate(_seatCapabilitiesDelegate),
+					name = Marshal.GetFunctionPointerForDelegate(_seatNameDelegate),
+				};
+				_seatListenerHandle = GCHandle.Alloc(seatListener, GCHandleType.Pinned);
+				_ = WaylandBindings.wl_proxy_add_listener(_wlSeat, _seatListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
+				break;
+			case "zxdg_decoration_manager_v1":
+				_xdgDecorationManager = WaylandBindings.wl_registry_bind_with_name(registry, name, "zxdg_decoration_manager_v1", Math.Min(version, 1u));
 				break;
 			case "xdg_wm_base":
 				_xdgWmBase = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.xdg_wm_base_interface, Math.Min(version, 4u));
@@ -375,6 +464,62 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 		Close();
 	}
 
+	private void OnSeatCapabilities(IntPtr data, IntPtr seat, uint capabilities)
+	{
+		var caps = (WlSeatCapability)capabilities;
+
+		if (this.Log().IsEnabled(LogLevel.Debug))
+		{
+			this.Log().Debug($"Seat capabilities: {caps}");
+		}
+
+		// Pointer
+		if ((caps & WlSeatCapability.Pointer) != 0 && _wlPointer == IntPtr.Zero)
+		{
+			// wl_seat.get_pointer opcode = 0
+			_wlPointer = WaylandBindings.wl_proxy_marshal_flags(
+				seat, 0, WaylandInterfaces.wl_pointer_interface,
+				WaylandBindings.wl_proxy_get_version(seat), 0, IntPtr.Zero);
+
+			if (this.Log().IsEnabled(LogLevel.Debug))
+			{
+				this.Log().Debug($"Created wl_pointer: {_wlPointer}");
+			}
+		}
+		else if ((caps & WlSeatCapability.Pointer) == 0 && _wlPointer != IntPtr.Zero)
+		{
+			WaylandBindings.wl_proxy_destroy(_wlPointer);
+			_wlPointer = IntPtr.Zero;
+		}
+
+		// Keyboard
+		if ((caps & WlSeatCapability.Keyboard) != 0 && _wlKeyboard == IntPtr.Zero)
+		{
+			// wl_seat.get_keyboard opcode = 1
+			_wlKeyboard = WaylandBindings.wl_proxy_marshal_flags(
+				seat, 1, WaylandInterfaces.wl_keyboard_interface,
+				WaylandBindings.wl_proxy_get_version(seat), 0, IntPtr.Zero);
+
+			if (this.Log().IsEnabled(LogLevel.Debug))
+			{
+				this.Log().Debug($"Created wl_keyboard: {_wlKeyboard}");
+			}
+		}
+		else if ((caps & WlSeatCapability.Keyboard) == 0 && _wlKeyboard != IntPtr.Zero)
+		{
+			WaylandBindings.wl_proxy_destroy(_wlKeyboard);
+			_wlKeyboard = IntPtr.Zero;
+		}
+	}
+
+	private void OnSeatName(IntPtr data, IntPtr seat, string name)
+	{
+		if (this.Log().IsEnabled(LogLevel.Debug))
+		{
+			this.Log().Debug($"Seat name: {name}");
+		}
+	}
+
 	// --- Static helpers ---
 
 	internal static WaylandXamlRootHost? GetHostFromWindow(Window window)
@@ -399,6 +544,14 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 		if (_windowToHost.TryRemove(_window, out _))
 		{
 			// Destroy Wayland objects in reverse order
+			if (_wlPointer != IntPtr.Zero)
+			{
+				WaylandBindings.wl_proxy_destroy(_wlPointer);
+			}
+			if (_wlKeyboard != IntPtr.Zero)
+			{
+				WaylandBindings.wl_proxy_destroy(_wlKeyboard);
+			}
 			if (_xdgToplevel != IntPtr.Zero)
 			{
 				WaylandBindings.wl_proxy_destroy(_xdgToplevel);
@@ -424,6 +577,7 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 			if (_xdgWmBaseListenerHandle.IsAllocated) { _xdgWmBaseListenerHandle.Free(); }
 			if (_xdgSurfaceListenerHandle.IsAllocated) { _xdgSurfaceListenerHandle.Free(); }
 			if (_xdgToplevelListenerHandle.IsAllocated) { _xdgToplevelListenerHandle.Free(); }
+			if (_seatListenerHandle.IsAllocated) { _seatListenerHandle.Free(); }
 
 			_closedTcs.TrySetResult();
 		}
