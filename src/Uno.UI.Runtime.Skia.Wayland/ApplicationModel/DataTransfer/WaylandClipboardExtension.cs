@@ -57,10 +57,13 @@ internal class WaylandClipboardExtension : IClipboardExtension
 		if (_pasteRequested)
 		{
 			_pasteRequested = false;
+			Console.Error.WriteLine($"[Clipboard] ProcessOnEventThread: calling get_text_from_display");
 			var ptr = uno_clipboard_get_text_from_display(_wlDisplay);
+			Console.Error.WriteLine($"[Clipboard] ProcessOnEventThread: ptr={ptr}");
 			if (ptr != IntPtr.Zero)
 			{
 				_cachedText = Marshal.PtrToStringUTF8(ptr);
+				Console.Error.WriteLine($"[Clipboard] ProcessOnEventThread: got '{_cachedText?.Substring(0, Math.Min(_cachedText?.Length ?? 0, 30))}'");
 				uno_clipboard_free(ptr);
 			}
 			else
@@ -102,8 +105,10 @@ internal class WaylandClipboardExtension : IClipboardExtension
 
 	public DataPackageView? GetContent()
 	{
+		Console.Error.WriteLine($"[Clipboard] GetContent called, requesting paste...");
 		_pasteRequested = true;
 		for (int i = 0; i < 15 && _pasteRequested; i++) { Thread.Sleep(20); }
+		Console.Error.WriteLine($"[Clipboard] paste done, cachedText='{_cachedText?.Substring(0, Math.Min(_cachedText?.Length ?? 0, 30))}' copiedText='{_copiedText?.Substring(0, Math.Min(_copiedText?.Length ?? 0, 30))}'");
 
 		var text = _cachedText ?? _copiedText;
 		if (text != null)
