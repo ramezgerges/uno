@@ -126,14 +126,14 @@ internal class WaylandEGLRenderer : WaylandRenderer, IDisposable
 			throw new InvalidOperationException("wl_egl_window_create failed.");
 		}
 
-		// Create EGL window surface.
-		// On Wayland, eglCreatePlatformWindowSurface expects wl_egl_window* directly (not &pointer).
-		// This differs from X11 where it expects Window* (pointer to the XID).
-		_eglSurface = EglHelper.EglCreatePlatformWindowSurface(_eglDisplay, _eglConfig, _wlEglWindow, [EglHelper.EGL_NONE]);
+		// Create EGL window surface — use eglCreateWindowSurface (EGL 1.4) which is
+		// the standard API for Wayland. eglCreatePlatformWindowSurface has platform-
+		// specific pointer semantics that differ between X11 and Wayland.
+		_eglSurface = EglBindings.eglCreateWindowSurface(_eglDisplay, _eglConfig, _wlEglWindow, null);
 		if (_eglSurface == IntPtr.Zero)
 		{
-			// Fallback: try eglCreateWindowSurface (EGL 1.4 API)
-			_eglSurface = EglBindings.eglCreateWindowSurface(_eglDisplay, _eglConfig, _wlEglWindow, null);
+			// Fallback: try eglCreatePlatformWindowSurface (EGL 1.5)
+			_eglSurface = EglHelper.EglCreatePlatformWindowSurface(_eglDisplay, _eglConfig, _wlEglWindow, [EglHelper.EGL_NONE]);
 		}
 		if (_eglSurface == IntPtr.Zero)
 		{
@@ -141,7 +141,10 @@ internal class WaylandEGLRenderer : WaylandRenderer, IDisposable
 		}
 
 		// Make context current to create GRContext
-		MakeCurrent();
+		if (!EglHelper.EglMakeCurrent(_eglDisplay, _eglSurface, _eglSurface, _eglContext))
+		{
+			throw new InvalidOperationException($"eglMakeCurrent failed: {Enum.GetName(EglHelper.EglGetError())}");
+		}
 
 		// Create SkiaSharp GL context
 		_glInterface = GRGlInterface.CreateGles(EglHelper.EglGetProcAddress);
@@ -156,7 +159,19 @@ internal class WaylandEGLRenderer : WaylandRenderer, IDisposable
 			throw new NotSupportedException("OpenGL ES is not supported in this system (failed to create GRContext).");
 		}
 
-		_contextCurrentDisposable!.Dispose();
+		// Validate: create a test surface and verify it works
+		var testInfo = new GRGlFramebufferInfo(DefaultFramebuffer, SKColorType.Rgba8888.ToGlSizedFormat());
+		var testTarget = new GRBackendRenderTarget(width, height, _samples, _stencil, testInfo);
+		using var testSurface = SKSurface.Create(_grContext, testTarget, GRSurfaceOrigin.BottomLeft, SKColorType.Rgba8888);
+		testTarget.Dispose();
+
+		if (testSurface == null)
+		{
+			throw new InvalidOperationException("EGL validation failed: SKSurface.Create returned null");
+		}
+
+		// Release context — the render thread will acquire it
+		EglHelper.EglMakeCurrent(_eglDisplay, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
 	}
 
 	protected override SKSurface UpdateSize(int width, int height)
