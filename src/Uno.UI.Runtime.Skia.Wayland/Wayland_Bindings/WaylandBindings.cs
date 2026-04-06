@@ -49,6 +49,10 @@ internal static partial class WaylandBindings
 	[LibraryImport(LibWaylandClient, EntryPoint = "wl_proxy_marshal_flags")]
 	internal static partial IntPtr wl_proxy_marshal_flags(IntPtr proxy, uint opcode, IntPtr iface, uint version, uint flags, int arg1, int arg2, int arg3, int arg4);
 
+	// For wl_pointer.set_cursor(serial, surface, hotspot_x, hotspot_y)
+	[LibraryImport(LibWaylandClient, EntryPoint = "wl_proxy_marshal_flags")]
+	internal static partial IntPtr wl_proxy_marshal_flags(IntPtr proxy, uint opcode, IntPtr iface, uint version, uint flags, uint arg1, IntPtr arg2, int arg3, int arg4);
+
 	[LibraryImport(LibWaylandClient, EntryPoint = "wl_proxy_marshal_flags")]
 	internal static partial IntPtr wl_proxy_marshal_flags(IntPtr proxy, uint opcode, IntPtr iface, uint version, uint flags, IntPtr arg1, int arg2, int arg3);
 

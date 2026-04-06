@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Windows.Devices.Input;
 using Windows.Foundation;
 using Windows.System;
@@ -71,33 +72,133 @@ internal class WaylandPointerInputSource : IUnoCorePointerInputSource
 		{
 			_pointerCursor = value;
 
-			var shape = value.Type switch
+			if (_lastPointerSerial == 0)
 			{
-				CoreCursorType.Arrow => WpCursorShapeDeviceV1Shape.Default,
-				CoreCursorType.Cross => WpCursorShapeDeviceV1Shape.Crosshair,
-				CoreCursorType.Hand => WpCursorShapeDeviceV1Shape.Pointer,
-				CoreCursorType.Help => WpCursorShapeDeviceV1Shape.Help,
-				CoreCursorType.IBeam => WpCursorShapeDeviceV1Shape.Text,
-				CoreCursorType.SizeAll => WpCursorShapeDeviceV1Shape.AllScroll,
-				CoreCursorType.SizeNortheastSouthwest => WpCursorShapeDeviceV1Shape.NESWResize,
-				CoreCursorType.SizeNorthSouth => WpCursorShapeDeviceV1Shape.NSResize,
-				CoreCursorType.SizeNorthwestSoutheast => WpCursorShapeDeviceV1Shape.NWSEResize,
-				CoreCursorType.SizeWestEast => WpCursorShapeDeviceV1Shape.EWResize,
-				CoreCursorType.UniversalNo => WpCursorShapeDeviceV1Shape.NotAllowed,
-				CoreCursorType.UpArrow => WpCursorShapeDeviceV1Shape.NResize,
-				CoreCursorType.Wait => WpCursorShapeDeviceV1Shape.Wait,
-				_ => WpCursorShapeDeviceV1Shape.Default
-			};
+				return;
+			}
 
-			if (_host.CursorShapeDevice != IntPtr.Zero && _lastPointerSerial != 0)
+			// Try wp_cursor_shape_device_v1 first (modern protocol)
+			if (_host.CursorShapeDevice != IntPtr.Zero)
 			{
-				// wp_cursor_shape_device_v1.set_shape opcode = 1, args: serial, shape
+				var shape = value.Type switch
+				{
+					CoreCursorType.Arrow => WpCursorShapeDeviceV1Shape.Default,
+					CoreCursorType.Cross => WpCursorShapeDeviceV1Shape.Crosshair,
+					CoreCursorType.Hand => WpCursorShapeDeviceV1Shape.Pointer,
+					CoreCursorType.Help => WpCursorShapeDeviceV1Shape.Help,
+					CoreCursorType.IBeam => WpCursorShapeDeviceV1Shape.Text,
+					CoreCursorType.SizeAll => WpCursorShapeDeviceV1Shape.AllScroll,
+					CoreCursorType.SizeNortheastSouthwest => WpCursorShapeDeviceV1Shape.NESWResize,
+					CoreCursorType.SizeNorthSouth => WpCursorShapeDeviceV1Shape.NSResize,
+					CoreCursorType.SizeNorthwestSoutheast => WpCursorShapeDeviceV1Shape.NWSEResize,
+					CoreCursorType.SizeWestEast => WpCursorShapeDeviceV1Shape.EWResize,
+					CoreCursorType.UniversalNo => WpCursorShapeDeviceV1Shape.NotAllowed,
+					CoreCursorType.UpArrow => WpCursorShapeDeviceV1Shape.NResize,
+					CoreCursorType.Wait => WpCursorShapeDeviceV1Shape.Wait,
+					_ => WpCursorShapeDeviceV1Shape.Default
+				};
+
 				WaylandBindings.wl_proxy_marshal_flags(
 					_host.CursorShapeDevice, CursorShape.WP_CURSOR_SHAPE_DEVICE_V1_SET_SHAPE,
 					IntPtr.Zero, WaylandBindings.wl_proxy_get_version(_host.CursorShapeDevice), 0,
 					(IntPtr)_lastPointerSerial, (IntPtr)(uint)shape);
+				return;
 			}
+
+			// Fallback: use wl_cursor_theme + wl_pointer.set_cursor
+			SetCursorFromTheme(value.Type);
 		}
+	}
+
+	private unsafe void SetCursorFromTheme(CoreCursorType cursorType)
+	{
+		var cursorTheme = _host.CursorTheme;
+		var wlPointer = _host.WlPointer;
+		var cursorSurface = _host.CursorSurface;
+
+		if (cursorTheme == IntPtr.Zero || wlPointer == IntPtr.Zero || cursorSurface == IntPtr.Zero)
+		{
+			return;
+		}
+
+		// Map CoreCursorType to XDG cursor name
+		// See: https://wayland.app/protocols/cursor-shape-v1 for standard names
+		var cursorName = cursorType switch
+		{
+			CoreCursorType.Arrow => "default",
+			CoreCursorType.Cross => "crosshair",
+			CoreCursorType.Hand => "pointer",
+			CoreCursorType.Help => "help",
+			CoreCursorType.IBeam => "text",
+			CoreCursorType.SizeAll => "all-scroll",
+			CoreCursorType.SizeNortheastSouthwest => "nesw-resize",
+			CoreCursorType.SizeNorthSouth => "ns-resize",
+			CoreCursorType.SizeNorthwestSoutheast => "nwse-resize",
+			CoreCursorType.SizeWestEast => "ew-resize",
+			CoreCursorType.UniversalNo => "not-allowed",
+			CoreCursorType.UpArrow => "n-resize",
+			CoreCursorType.Wait => "wait",
+			CoreCursorType.Person => "default",
+			CoreCursorType.Pin => "default",
+			_ => "default"
+		};
+
+		var cursor = WaylandCursorBindings.wl_cursor_theme_get_cursor(cursorTheme, cursorName);
+		if (cursor == IntPtr.Zero)
+		{
+			// Try legacy X11 cursor names as fallback
+			var legacyName = cursorType switch
+			{
+				CoreCursorType.Hand => "hand2",
+				CoreCursorType.IBeam => "xterm",
+				CoreCursorType.Wait => "watch",
+				CoreCursorType.Cross => "cross",
+				CoreCursorType.SizeNorthSouth => "sb_v_double_arrow",
+				CoreCursorType.SizeWestEast => "sb_h_double_arrow",
+				_ => "left_ptr"
+			};
+			cursor = WaylandCursorBindings.wl_cursor_theme_get_cursor(cursorTheme, legacyName);
+		}
+
+		if (cursor == IntPtr.Zero)
+		{
+			return;
+		}
+
+		// struct wl_cursor { uint image_count; wl_cursor_image** images; char* name; }
+		var wlCursor = Marshal.PtrToStructure<WlCursor>(cursor);
+		if (wlCursor.image_count == 0 || wlCursor.images == IntPtr.Zero)
+		{
+			return;
+		}
+
+		// Get first image: images[0]
+		var imagePtr = *(IntPtr*)wlCursor.images.ToPointer();
+		var image = Marshal.PtrToStructure<WlCursorImage>(imagePtr);
+		var buffer = WaylandCursorBindings.wl_cursor_image_get_buffer(imagePtr);
+		if (buffer == IntPtr.Zero)
+		{
+			return;
+		}
+
+		// wl_surface.attach opcode = 1
+		WaylandBindings.wl_proxy_marshal_flags(
+			cursorSurface, 1, IntPtr.Zero, WaylandBindings.wl_proxy_get_version(cursorSurface), 0,
+			buffer, 0, 0);
+
+		// wl_surface.damage_buffer opcode = 9
+		WaylandBindings.wl_proxy_marshal_flags(
+			cursorSurface, 9, IntPtr.Zero, WaylandBindings.wl_proxy_get_version(cursorSurface), 0,
+			0, 0, (int)image.width, (int)image.height);
+
+		// wl_surface.commit opcode = 6
+		WaylandBindings.wl_proxy_marshal_flags(
+			cursorSurface, 6, IntPtr.Zero, WaylandBindings.wl_proxy_get_version(cursorSurface), 0);
+
+		// wl_pointer.set_cursor opcode = 0, args: serial, surface, hotspot_x, hotspot_y
+		WaylandBindings.wl_proxy_marshal_flags(
+			wlPointer, 0, IntPtr.Zero, WaylandBindings.wl_proxy_get_version(wlPointer), 0,
+			_lastPointerSerial, cursorSurface, (int)image.hotspot_x, (int)image.hotspot_y);
 	}
 
 	public Point PointerPosition => _mousePosition;

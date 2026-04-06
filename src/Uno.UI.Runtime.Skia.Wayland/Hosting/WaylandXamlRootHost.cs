@@ -38,6 +38,8 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	private IntPtr _xdgDecorationManager;
 	private IntPtr _cursorShapeManager;
 	private IntPtr _cursorShapeDevice;
+	private IntPtr _cursorTheme;
+	private IntPtr _cursorSurface;
 	private IntPtr _wlTouch;
 	private IntPtr _wlOutput;
 	private IntPtr _wlSurface;
@@ -150,7 +152,10 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	internal IntPtr WlDisplay => _wlDisplay;
 	internal IntPtr WlSurface => _wlSurface;
 	internal IntPtr WlShm => _wlShm;
+	internal IntPtr WlPointer => _wlPointer;
 	internal IntPtr CursorShapeDevice => _cursorShapeDevice;
+	internal IntPtr CursorTheme => _cursorTheme;
+	internal IntPtr CursorSurface => _cursorSurface;
 	internal int Width => _width;
 	internal int Height => _height;
 
@@ -195,6 +200,19 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 		if (_xdgWmBase == IntPtr.Zero)
 		{
 			throw new InvalidOperationException("xdg_wm_base not found — compositor doesn't support xdg-shell");
+		}
+
+		// Load cursor theme for wl_pointer.set_cursor fallback
+		if (_wlShm != IntPtr.Zero)
+		{
+			_cursorTheme = WaylandCursorBindings.wl_cursor_theme_load(null, 24, _wlShm);
+			if (_cursorTheme != IntPtr.Zero)
+			{
+				// Create a dedicated surface for the cursor
+				_cursorSurface = WaylandBindings.wl_proxy_marshal_flags(
+					_wlCompositor, 0, WaylandInterfaces.wl_surface_interface,
+					WaylandBindings.wl_proxy_get_version(_wlCompositor), 0, IntPtr.Zero);
+			}
 		}
 
 		// Create surface
@@ -871,6 +889,14 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 		if (_windowToHost.TryRemove(_window, out _))
 		{
 			// Destroy Wayland objects in reverse order
+			if (_cursorSurface != IntPtr.Zero)
+			{
+				WaylandBindings.wl_proxy_destroy(_cursorSurface);
+			}
+			if (_cursorTheme != IntPtr.Zero)
+			{
+				WaylandCursorBindings.wl_cursor_theme_destroy(_cursorTheme);
+			}
 			if (_cursorShapeDevice != IntPtr.Zero)
 			{
 				WaylandBindings.wl_proxy_destroy(_cursorShapeDevice);
