@@ -204,6 +204,9 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 			throw new InvalidOperationException("xdg_wm_base not found — compositor doesn't support xdg-shell");
 		}
 
+		// Give clipboard the display pointer for paste operations
+		WaylandClipboardExtension.Instance.SetDisplay(_wlDisplay);
+
 		// Load cursor theme for wl_pointer.set_cursor fallback
 		if (_wlShm != IntPtr.Zero)
 		{
@@ -365,6 +368,9 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 
 		while (_renderLoopRunning && !_closedTcs.Task.IsCompleted)
 		{
+			// Process clipboard paste requests (must be on event thread)
+			WaylandClipboardExtension.Instance.ProcessOnEventThread();
+
 			// Flush outgoing requests
 			_ = WaylandBindings.wl_display_flush(_wlDisplay);
 
