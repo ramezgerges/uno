@@ -40,6 +40,8 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	private WlDataDeviceDropDelegate? _dropDelegate;
 	private WlDataDeviceSelectionDelegate? _selectionDelegate;
 	private WlDataOfferOfferDelegate? _offerOfferDelegate;
+	private WlDataOfferSourceActionsDelegate? _offerSourceActionsDelegate;
+	private WlDataOfferActionDelegate? _offerActionDelegate;
 	private WlDataSourceTargetDelegate? _sourceTargetDelegate;
 	private WlDataSourceSendDelegate? _sourceSendDelegate;
 	private WlDataSourceCancelledDelegate? _sourceCancelledDelegate;
@@ -315,11 +317,13 @@ internal class WaylandClipboardExtension : IClipboardExtension
 		}
 
 		_offerOfferDelegate = OnOfferMimeType;
+		_offerSourceActionsDelegate = OnOfferSourceActions;
+		_offerActionDelegate = OnOfferAction;
 		var listener = new WlDataOfferListener
 		{
 			offer = Marshal.GetFunctionPointerForDelegate(_offerOfferDelegate),
-			source_actions = IntPtr.Zero,
-			action = IntPtr.Zero,
+			source_actions = Marshal.GetFunctionPointerForDelegate(_offerSourceActionsDelegate),
+			action = Marshal.GetFunctionPointerForDelegate(_offerActionDelegate),
 		};
 		_dataOfferListenerHandle = GCHandle.Alloc(listener, GCHandleType.Pinned);
 		_ = WaylandBindings.wl_proxy_add_listener(offer, _dataOfferListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
@@ -329,6 +333,9 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	{
 		_offerMimeTypes.Add(mimeType);
 	}
+
+	private void OnOfferSourceActions(IntPtr data, IntPtr offer, uint sourceActions) { }
+	private void OnOfferAction(IntPtr data, IntPtr offer, uint dndAction) { }
 
 	private void OnSelection(IntPtr data, IntPtr dataDevice, IntPtr offer)
 	{
