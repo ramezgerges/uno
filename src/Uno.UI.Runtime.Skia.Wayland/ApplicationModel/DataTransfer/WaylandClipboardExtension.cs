@@ -19,7 +19,9 @@ internal class WaylandClipboardExtension : IClipboardExtension
 #pragma warning restore CS0414
 	private static readonly System.Collections.Generic.List<string> s_mimeTypes = new();
 
+	private volatile string? _cachedIncoming;
 	private volatile string? _copiedText;
+	private volatile bool _pasteRequested;
 	private volatile uint _lastSerial;
 
 	public event EventHandler<object>? ContentChanged;
@@ -98,14 +100,40 @@ internal class WaylandClipboardExtension : IClipboardExtension
 
 	internal void ProcessOnEventThread()
 	{
-		// In-process only for now
+		if (!_initialized) return;
+		if (_pasteRequested)
+		{
+			_pasteRequested = false;
+			_cachedIncoming = ReadOffer();
+		}
 	}
 
-	public void Clear() { _copiedText = null; ContentChanged?.Invoke(this, EventArgs.Empty); }
+	private string? ReadOffer()
+	{
+		if (_currentOffer == IntPtr.Zero || !_hasSelection) return null;
+		string? mime = s_mimeTypes.Contains("text/plain;charset=utf-8") ? "text/plain;charset=utf-8"
+			: s_mimeTypes.Contains("text/plain") ? "text/plain" : null;
+		if (mime == null) return null;
+		var fds = new int[2];
+		if (Pipe(fds) != 0) return null;
+		var mp = Marshal.StringToHGlobalAnsi(mime);
+		try { WaylandBindings.wl_proxy_marshal_flags(_currentOffer, 0, IntPtr.Zero, WaylandBindings.wl_proxy_get_version(_currentOffer), 0, mp, fds[1]); }
+		finally { Marshal.FreeHGlobal(mp); }
+		_ = WaylandBindings.close(fds[1]);
+		_ = WaylandBindings.wl_display_flush(_wlDisplay);
+		var buf = new byte[65536]; var sb = new System.Text.StringBuilder(); int n;
+		while ((n = LibcRead(fds[0], buf, buf.Length)) > 0) sb.Append(System.Text.Encoding.UTF8.GetString(buf, 0, n));
+		_ = WaylandBindings.close(fds[0]);
+		return sb.Length > 0 ? sb.ToString() : null;
+	}
+
+	public void Clear() { _copiedText = null; _cachedIncoming = null; ContentChanged?.Invoke(this, EventArgs.Empty); }
 	public void Flush() { }
 	public DataPackageView? GetContent()
 	{
-		var text = _copiedText;
+		_pasteRequested = true;
+		for (int i = 0; i < 15 && _pasteRequested; i++) Thread.Sleep(20);
+		var text = _cachedIncoming ?? _copiedText;
 		if (text != null) { var p = new DataPackage(); p.SetText(text); return p.GetView(); }
 		return null;
 	}
@@ -168,4 +196,7 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	private static void OffOffer(IntPtr data, IntPtr offer, string mime) { if (mime != null) s_mimeTypes.Add(mime); }
 	private static void OffSA(IntPtr data, IntPtr offer, uint sa) { }
 	private static void OffAct(IntPtr data, IntPtr offer, uint a) { }
+
+	[DllImport("libc", EntryPoint = "pipe")] private static extern int Pipe(int[] fds);
+	[DllImport("libc", EntryPoint = "read")] private static extern int LibcRead(int fd, byte[] buf, int count);
 }
