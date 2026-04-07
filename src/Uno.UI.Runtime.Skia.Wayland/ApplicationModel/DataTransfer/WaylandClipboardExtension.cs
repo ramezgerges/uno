@@ -7,63 +7,57 @@ using Uno.ApplicationModel.DataTransfer;
 namespace Uno.WinUI.Runtime.Skia.Wayland;
 
 /// <summary>
-/// Clipboard using libuno-clipboard.so. Both paste and copy use the app's
-/// wl_display and execute on the event thread. The native helper uses
-/// wayland-scanner generated code for correct protocol handling.
+/// Clipboard using libuno-clipboard.so with persistent state.
+/// The native helper creates ONE wl_data_device at init and tracks
+/// selection events through the app's normal dispatch loop.
+/// All native calls happen on the event thread.
 /// </summary>
 internal class WaylandClipboardExtension : IClipboardExtension
 {
 	private const string Lib = "libuno-clipboard";
 
-	[DllImport(Lib)]
-	private static extern IntPtr uno_clipboard_get_text_from_display(IntPtr wlDisplay);
-
-	[DllImport(Lib)]
-	private static extern IntPtr uno_clipboard_set_selection(
-		IntPtr wlDisplay, IntPtr text, uint serial, out IntPtr outCtx);
-
-	[DllImport(Lib)]
-	private static extern void uno_clipboard_destroy_source(IntPtr source, IntPtr ctx);
-
-	[DllImport(Lib)]
-	private static extern void uno_clipboard_free(IntPtr ptr);
+	[DllImport(Lib)] private static extern int uno_clipboard_init(IntPtr wlDisplay);
+	[DllImport(Lib)] private static extern IntPtr uno_clipboard_get_text();
+	[DllImport(Lib)] private static extern int uno_clipboard_set_text([MarshalAs(UnmanagedType.LPUTF8Str)] string text, uint serial);
+	[DllImport(Lib)] private static extern void uno_clipboard_free(IntPtr ptr);
 
 	private static WaylandClipboardExtension? _instance;
 	internal static WaylandClipboardExtension Instance => _instance ??= new();
 
-	private IntPtr _wlDisplay;
 	private volatile string? _cachedText;
 	private volatile string? _copiedText;
 	private volatile bool _pasteRequested;
 	private volatile string? _pendingCopyText;
 	private volatile uint _lastSerial;
-
-	// Current data source (kept alive for send callbacks)
-	private IntPtr _currentSource;
-	private IntPtr _currentCtx;
-	private IntPtr _currentTextPtr;
+	private bool _initialized;
 
 	public event EventHandler<object>? ContentChanged;
 	public void StartContentChanged() { }
 	public void StopContentChanged() { }
 
-	internal void SetDisplay(IntPtr wlDisplay) => _wlDisplay = wlDisplay;
 	internal void SetLastSerial(uint serial) => _lastSerial = serial;
 
+	/// <summary>Called ONCE at the start of the event thread.</summary>
+	internal void InitOnEventThread(IntPtr wlDisplay)
+	{
+		if (_initialized) { return; }
+		var rc = uno_clipboard_init(wlDisplay);
+		_initialized = rc == 0;
+		Console.Error.WriteLine($"[Clipboard] init result={rc}");
+	}
+
+	/// <summary>Called each event loop iteration on the event thread.</summary>
 	internal void ProcessOnEventThread()
 	{
-		if (_wlDisplay == IntPtr.Zero) { return; }
+		if (!_initialized) { return; }
 
 		if (_pasteRequested)
 		{
 			_pasteRequested = false;
-			Console.Error.WriteLine($"[Clipboard] ProcessOnEventThread: calling get_text_from_display");
-			var ptr = uno_clipboard_get_text_from_display(_wlDisplay);
-			Console.Error.WriteLine($"[Clipboard] ProcessOnEventThread: ptr={ptr}");
+			var ptr = uno_clipboard_get_text();
 			if (ptr != IntPtr.Zero)
 			{
 				_cachedText = Marshal.PtrToStringUTF8(ptr);
-				Console.Error.WriteLine($"[Clipboard] ProcessOnEventThread: got '{_cachedText?.Substring(0, Math.Min(_cachedText?.Length ?? 0, 30))}'");
 				uno_clipboard_free(ptr);
 			}
 			else
@@ -75,22 +69,7 @@ internal class WaylandClipboardExtension : IClipboardExtension
 		var copyText = Interlocked.Exchange(ref _pendingCopyText, null);
 		if (copyText != null)
 		{
-			// Destroy previous source
-			if (_currentSource != IntPtr.Zero)
-			{
-				uno_clipboard_destroy_source(_currentSource, _currentCtx);
-				_currentSource = IntPtr.Zero;
-				_currentCtx = IntPtr.Zero;
-			}
-			if (_currentTextPtr != IntPtr.Zero)
-			{
-				Marshal.FreeHGlobal(_currentTextPtr);
-			}
-
-			// The native function needs a C string that stays alive as long as the source
-			_currentTextPtr = Marshal.StringToHGlobalAnsi(copyText);
-			_currentSource = uno_clipboard_set_selection(
-				_wlDisplay, _currentTextPtr, _lastSerial, out _currentCtx);
+			_ = uno_clipboard_set_text(copyText, _lastSerial);
 		}
 	}
 
@@ -105,10 +84,8 @@ internal class WaylandClipboardExtension : IClipboardExtension
 
 	public DataPackageView? GetContent()
 	{
-		Console.Error.WriteLine($"[Clipboard] GetContent called, requesting paste...");
 		_pasteRequested = true;
 		for (int i = 0; i < 15 && _pasteRequested; i++) { Thread.Sleep(20); }
-		Console.Error.WriteLine($"[Clipboard] paste done, cachedText='{_cachedText?.Substring(0, Math.Min(_cachedText?.Length ?? 0, 30))}' copiedText='{_copiedText?.Substring(0, Math.Min(_copiedText?.Length ?? 0, 30))}'");
 
 		var text = _cachedText ?? _copiedText;
 		if (text != null)
@@ -129,12 +106,7 @@ internal class WaylandClipboardExtension : IClipboardExtension
 			if (view.Contains(StandardDataFormats.Text))
 			{
 				var text = view.GetTextAsync().AsTask().GetAwaiter().GetResult();
-				if (text != null)
-				{
-					_copiedText = text;
-					_cachedText = null;
-					_pendingCopyText = text;
-				}
+				if (text != null) { _copiedText = text; _cachedText = null; _pendingCopyText = text; }
 			}
 		}
 		catch { }
