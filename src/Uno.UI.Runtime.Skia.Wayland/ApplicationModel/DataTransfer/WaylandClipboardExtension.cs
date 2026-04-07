@@ -102,13 +102,21 @@ internal class WaylandClipboardExtension : IClipboardExtension
 
 	internal void ProcessOnEventThread()
 	{
-		// No-op — testing if just having the fields causes segfault
+		if (!_initialized) return;
+		if (_pasteRequested)
+		{
+			_pasteRequested = false;
+			// Don't actually read yet — just log
+			Console.Error.WriteLine("[CB] paste requested, would read offer here");
+		}
 	}
 
 	public void Clear() { _copiedText = null; _cachedIncoming = null; ContentChanged?.Invoke(this, EventArgs.Empty); }
 	public void Flush() { }
 	public DataPackageView? GetContent()
 	{
+		_pasteRequested = true;
+		for (int i = 0; i < 15 && _pasteRequested; i++) Thread.Sleep(20);
 		var text = _cachedIncoming ?? _copiedText;
 		if (text != null) { var p = new DataPackage(); p.SetText(text); return p.GetView(); }
 		return null;
