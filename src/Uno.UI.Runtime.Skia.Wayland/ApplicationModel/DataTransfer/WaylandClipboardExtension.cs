@@ -12,13 +12,10 @@ internal class WaylandClipboardExtension : IClipboardExtension
 {
 	private const string Lib = "libuno-clipboard";
 
-	// C helper for protocol operations
 	[DllImport(Lib)] private static extern int uno_clipboard_init(IntPtr wlDisplay);
 	[DllImport(Lib)] private static extern IntPtr uno_clipboard_get_text();
 	[DllImport(Lib)] private static extern int uno_clipboard_set_text([MarshalAs(UnmanagedType.LPUTF8Str)] string text, uint serial);
 	[DllImport(Lib)] private static extern void uno_clipboard_free(IntPtr ptr);
-	[DllImport(Lib)] private static extern IntPtr uno_clipboard_get_device();
-	[DllImport(Lib)] private static extern IntPtr uno_clipboard_get_manager();
 
 	private static WaylandClipboardExtension? _instance;
 	internal static WaylandClipboardExtension Instance => _instance ??= new();
@@ -29,9 +26,6 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	private volatile string? _pendingCopyText;
 	private volatile uint _lastSerial;
 	private bool _initialized;
-#pragma warning disable CS0414
-	private bool _csharpListenerTest;
-#pragma warning restore CS0414
 
 	public event EventHandler<object>? ContentChanged;
 	public void StartContentChanged() { }
@@ -41,50 +35,7 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	internal void InitOnEventThread(IntPtr wlDisplay)
 	{
 		if (_initialized) { return; }
-
-		// Step 1: Use C helper to init (creates device with C listeners)
-		var rc = uno_clipboard_init(wlDisplay);
-		Console.Error.WriteLine($"[Clipboard] C init result={rc}");
-		if (rc != 0) { return; }
-		_initialized = true;
-
-		// Step 2: Try to add a C# listener to the C-created device
-		// This tests whether C# listeners work on a properly-created device
-		var device = uno_clipboard_get_device();
-		Console.Error.WriteLine($"[Clipboard] device from C={device}");
-
-		if (device != IntPtr.Zero)
-		{
-			try
-			{
-				// Create a SECOND data device using C# marshalling,
-				// with the C helper's manager — to test if C# device creation is the issue
-				var manager = uno_clipboard_get_manager();
-				Console.Error.WriteLine($"[Clipboard] manager from C={manager}");
-
-				if (manager != IntPtr.Zero)
-				{
-					// Test: create device via C# marshal_flags
-					var testDevice = WaylandBindings.wl_proxy_marshal_flags(
-						manager, 1, WaylandInterfaces.wl_data_device_interface,
-						WaylandBindings.wl_proxy_get_version(manager), 0,
-						IntPtr.Zero, IntPtr.Zero); // NULL seat — will fail but tests if marshal_flags crashes
-					Console.Error.WriteLine($"[Clipboard] C# test device (null seat)={testDevice}");
-					// Don't use this device — it's invalid (null seat)
-					if (testDevice != IntPtr.Zero)
-					{
-						WaylandBindings.wl_proxy_destroy(testDevice);
-					}
-				}
-
-				_csharpListenerTest = true;
-				Console.Error.WriteLine("[Clipboard] C# test passed, no crash");
-			}
-			catch (Exception ex)
-			{
-				Console.Error.WriteLine($"[Clipboard] C# test exception: {ex.Message}");
-			}
-		}
+		_initialized = uno_clipboard_init(wlDisplay) == 0;
 	}
 
 	internal void ProcessOnEventThread()
