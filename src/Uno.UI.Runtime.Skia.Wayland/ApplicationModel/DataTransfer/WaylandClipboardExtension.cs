@@ -64,10 +64,29 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	public void StopContentChanged() { }
 	internal void SetLastSerial(uint serial) => _lastSerial = serial;
 
+	private const string Lib = "libuno-clipboard";
+	[DllImport(Lib)] private static extern int uno_clipboard_init(IntPtr wlDisplay);
+	[DllImport(Lib)] private static extern IntPtr uno_clipboard_get_text();
+	[DllImport(Lib)] private static extern int uno_clipboard_set_text([MarshalAs(UnmanagedType.LPUTF8Str)] string text, uint serial);
+	[DllImport(Lib)] private static extern void uno_clipboard_free(IntPtr ptr);
+
+	private bool _useNative;
+
 	internal void InitOnEventThread(IntPtr wlDisplay)
 	{
 		if (_initialized) return;
 		_wlDisplay = wlDisplay;
+
+		// Test: use C helper for init, C# for get/set
+		// If this still crashes, the issue is NOT our C# init code
+		var cResult = uno_clipboard_init(wlDisplay);
+		Console.Error.WriteLine($"[Clipboard] C init={cResult}, now trying C# init...");
+		if (cResult == 0)
+		{
+			_useNative = true;
+			_initialized = true;
+			return;
+		}
 
 		// Create delegates
 		s_regGlobal = RegGlobal;
@@ -154,6 +173,20 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	internal void ProcessOnEventThread()
 	{
 		if (!_initialized) return;
+
+		if (_useNative)
+		{
+			if (_pasteRequested)
+			{
+				_pasteRequested = false;
+				var ptr = uno_clipboard_get_text();
+				if (ptr != IntPtr.Zero) { _cachedIncomingText = Marshal.PtrToStringUTF8(ptr); uno_clipboard_free(ptr); }
+				else { _cachedIncomingText = null; }
+			}
+			var copyText = Interlocked.Exchange(ref _pendingCopyText, null);
+			if (copyText != null) { _ = uno_clipboard_set_text(copyText, _lastSerial); }
+			return;
+		}
 
 		if (_pasteRequested)
 		{
