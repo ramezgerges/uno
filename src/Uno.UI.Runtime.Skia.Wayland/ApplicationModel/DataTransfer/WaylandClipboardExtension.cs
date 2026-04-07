@@ -110,21 +110,15 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	public void StopContentChanged() { }
 	internal void SetLastSerial(uint serial) => _lastSerial = serial;
 
-	/// <summary>Called ONCE on the event thread.</summary>
-	internal void InitOnEventThread(IntPtr wlDisplay)
+	/// <summary>Called ONCE on the event thread. Uses host's already-bound objects.</summary>
+	internal void InitOnEventThread(IntPtr wlDisplay, IntPtr wlSeat, IntPtr wlDataDeviceManager)
 	{
 		if (_initialized) { return; }
+		if (wlSeat == IntPtr.Zero || wlDataDeviceManager == IntPtr.Zero) { return; }
+
 		_wlDisplay = wlDisplay;
-
-		// Bind seat + data_device_manager via a temporary registry
-		var reg = WaylandBindings.wl_display_get_registry(wlDisplay);
-		_ = WaylandBindings.wl_proxy_add_listener(reg, s_regListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
-		_ = WaylandBindings.wl_display_roundtrip(wlDisplay);
-
-		if (_wlSeat == IntPtr.Zero || _wlManager == IntPtr.Zero)
-		{
-			return;
-		}
+		_wlSeat = wlSeat;
+		_wlManager = wlDataDeviceManager;
 
 		// Create data device: get_data_device opcode=1
 		_wlDevice = WaylandBindings.wl_proxy_marshal_flags(
@@ -135,9 +129,6 @@ internal class WaylandClipboardExtension : IClipboardExtension
 		if (_wlDevice == IntPtr.Zero) { return; }
 
 		_ = WaylandBindings.wl_proxy_add_listener(_wlDevice, s_devListenerHandle.AddrOfPinnedObject(), IntPtr.Zero);
-
-		// Roundtrip to get initial selection
-		_ = WaylandBindings.wl_display_roundtrip(wlDisplay);
 
 		_initialized = true;
 	}
