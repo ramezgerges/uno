@@ -195,3 +195,6 @@ void uno_clipboard_free(char *p) { free(p); }
 struct wl_data_device* uno_clipboard_get_device(void) { return g_device; }
 struct wl_data_device_manager* uno_clipboard_get_manager(void) { return g_manager; }
 struct wl_display* uno_clipboard_get_display(void) { return g_display; }
+
+/* Create device only, return it for C# to add listener */
+struct wl_data_device* uno_clipboard_get_device_ptr(void) { return g_device; }

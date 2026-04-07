@@ -7,20 +7,17 @@ using Uno.ApplicationModel.DataTransfer;
 namespace Uno.WinUI.Runtime.Skia.Wayland;
 
 /// <summary>
-/// Clipboard using libuno-clipboard.so — a small native helper (source in native/uno-clipboard.c)
-/// that uses wayland-scanner generated protocol code. The helper creates a persistent
-/// wl_data_device on the app's display and tracks selection events through the normal
-/// wl_display_dispatch loop. All calls happen on the event thread.
+/// Clipboard using libuno-clipboard.so for wl_data_device protocol.
+/// Source: native/uno-clipboard.c (192 lines, compiled to 23KB .so).
+/// All protocol calls happen on the event thread via the C helper.
+/// C# provides thread-safe UI integration (GetContent/SetContent).
 /// </summary>
 internal class WaylandClipboardExtension : IClipboardExtension
 {
-	private const string Lib = "libuno-clipboard";
-
-	[DllImport(Lib)] private static extern int uno_clipboard_init(IntPtr wlDisplay);
-	[DllImport(Lib)] private static extern IntPtr uno_clipboard_get_text();
-	[DllImport(Lib)] private static extern int uno_clipboard_set_text(
-		[MarshalAs(UnmanagedType.LPUTF8Str)] string text, uint serial);
-	[DllImport(Lib)] private static extern void uno_clipboard_free(IntPtr ptr);
+	[DllImport("libuno-clipboard")] private static extern int uno_clipboard_init(IntPtr wlDisplay);
+	[DllImport("libuno-clipboard")] private static extern IntPtr uno_clipboard_get_text();
+	[DllImport("libuno-clipboard")] private static extern int uno_clipboard_set_text([MarshalAs(UnmanagedType.LPUTF8Str)] string text, uint serial);
+	[DllImport("libuno-clipboard")] private static extern void uno_clipboard_free(IntPtr ptr);
 
 	private static WaylandClipboardExtension? _instance;
 	internal static WaylandClipboardExtension Instance => _instance ??= new();
