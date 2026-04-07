@@ -13,6 +13,11 @@ internal class WaylandClipboardExtension : IClipboardExtension
 
 	private IntPtr _wlDisplay;
 	private bool _initialized;
+	private IntPtr _currentOffer;
+#pragma warning disable CS0414
+	private bool _hasSelection;
+#pragma warning restore CS0414
+	private static readonly System.Collections.Generic.List<string> s_mimeTypes = new();
 
 	private volatile string? _copiedText;
 	private volatile uint _lastSerial;
@@ -144,16 +149,23 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	private static void SeatName(IntPtr data, IntPtr seat, string n) { Console.Error.WriteLine($"[CB] SeatName: {n}"); }
 	private static void DevOffer(IntPtr data, IntPtr dev, IntPtr offer)
 	{
-		Console.Error.WriteLine($"[CB] DevOffer: {offer}");
 		var self = Instance;
+		if (self._currentOffer != IntPtr.Zero) { WaylandBindings.wl_proxy_destroy(self._currentOffer); s_mimeTypes.Clear(); }
+		self._currentOffer = offer;
+		self._hasSelection = false;
 		_ = WaylandBindings.wl_proxy_add_listener(offer, self._offerPtr, IntPtr.Zero);
 	}
 	private static void DevEnter(IntPtr d, IntPtr dd, uint serial, IntPtr surface, int x, int y, IntPtr offer) { Console.Error.WriteLine("[CB] DevEnter"); }
 	private static void DevLeave(IntPtr d, IntPtr dd) { Console.Error.WriteLine("[CB] DevLeave"); }
 	private static void DevMotion(IntPtr d, IntPtr dd, uint time, int x, int y) { Console.Error.WriteLine("[CB] DevMotion"); }
 	private static void DevDrop(IntPtr d, IntPtr dd) { Console.Error.WriteLine("[CB] DevDrop"); }
-	private static void DevSel(IntPtr data, IntPtr dev, IntPtr offer) { Console.Error.WriteLine($"[CB] DevSel: {offer}"); }
-	private static void OffOffer(IntPtr data, IntPtr offer, string mime) { Console.Error.WriteLine($"[CB] OffOffer: {mime}"); }
+	private static void DevSel(IntPtr data, IntPtr dev, IntPtr offer)
+	{
+		var self = Instance;
+		self._hasSelection = true;
+		if (offer == IntPtr.Zero) { if (self._currentOffer != IntPtr.Zero) { WaylandBindings.wl_proxy_destroy(self._currentOffer); self._currentOffer = IntPtr.Zero; } s_mimeTypes.Clear(); }
+	}
+	private static void OffOffer(IntPtr data, IntPtr offer, string mime) { if (mime != null) s_mimeTypes.Add(mime); }
 	private static void OffSA(IntPtr data, IntPtr offer, uint sa) { }
 	private static void OffAct(IntPtr data, IntPtr offer, uint a) { }
 }
