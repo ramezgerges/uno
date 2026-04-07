@@ -36,7 +36,6 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	private IntPtr _wlKeyboard;
 	private IntPtr _xdgWmBase;
 	private IntPtr _xdgDecorationManager;
-	private IntPtr _wlDataDeviceManager;
 	private IntPtr _cursorShapeManager;
 	private IntPtr _cursorShapeDevice;
 	private IntPtr _cursorTheme;
@@ -365,7 +364,7 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 	{
 		// Init clipboard on event thread — creates wl_data_device that
 		// receives selection events through normal dispatch
-		WaylandClipboardExtension.Instance.InitOnEventThread(_wlDisplay, _wlSeat, _wlDataDeviceManager);
+		WaylandClipboardExtension.Instance.InitOnEventThread(_wlDisplay);
 
 		var fd = WaylandBindings.wl_display_get_fd(_wlDisplay);
 		var pollFd = new PollFd { fd = fd, events = WaylandBindings.POLLIN, revents = 0 };
@@ -467,9 +466,6 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 				break;
 			case "wl_shm":
 				_wlShm = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.wl_shm_interface, Math.Min(version, 1u));
-				break;
-			case "wl_data_device_manager":
-				_wlDataDeviceManager = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.wl_data_device_manager_interface, 1u);
 				break;
 			case "wl_seat":
 				_wlSeat = WaylandBindings.wl_registry_bind(registry, name, WaylandInterfaces.wl_seat_interface, Math.Min(version, 5u));

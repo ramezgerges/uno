@@ -190,3 +190,32 @@ int uno_clipboard_set_text(const char *text, uint32_t serial) {
 }
 
 void uno_clipboard_free(char *p) { free(p); }
+
+/* Debug: just create data device with listener, nothing else */
+int uno_clipboard_debug_init(struct wl_display *display) {
+    if (!display) return -1;
+    struct wl_registry *reg = wl_display_get_registry(display);
+    struct paste_state s = {0};
+    /* Use the paste registry listener */
+    wl_registry_add_listener(reg, &pr_l, &s);
+    wl_display_roundtrip(display);
+    fprintf(stderr, "[C] seat=%p manager=%p\n", (void*)s.seat, (void*)s.manager);
+    if (!s.seat || !s.manager) return -2;
+
+    struct wl_data_device *dev = wl_data_device_manager_get_data_device(s.manager, s.seat);
+    fprintf(stderr, "[C] device=%p\n", (void*)dev);
+    wl_data_device_add_listener(dev, &pd_l, &s);
+    fprintf(stderr, "[C] listener added, doing roundtrip...\n");
+    wl_display_roundtrip(display);
+    fprintf(stderr, "[C] done. offer=%p done=%d mimes=%d\n", (void*)s.offer, s.done, s.mc);
+    
+    /* Cleanup */
+    if (s.offer) wl_data_offer_destroy(s.offer);
+    for (int i = 0; i < s.mc; i++) free(s.mimes[i]);
+    free(s.mimes);
+    wl_data_device_destroy(dev);
+    wl_data_device_manager_destroy(s.manager);
+    wl_seat_destroy(s.seat);
+    wl_registry_destroy(reg);
+    return 0;
+}
