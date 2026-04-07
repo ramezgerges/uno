@@ -38,6 +38,9 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	// Static delegates — never GC'd
 	private static WlRegistryGlobalDelegate? s_regGlobal;
 	private static WlRegistryGlobalRemoveDelegate? s_regRemove;
+	private static WlSeatCapabilitiesDelegate? s_seatCaps;
+	private static WlSeatNameDelegate? s_seatName;
+	private static GCHandle s_seatLH;
 	private static WlDataDeviceDataOfferDelegate? s_devOffer;
 	private static WlDataDeviceEnterDelegate? s_devEnter;
 	private static WlDataDeviceLeaveDelegate? s_devLeave;
@@ -243,10 +246,27 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	{
 		var self = Instance;
 		if (iface == "wl_seat" && self._mySeat == IntPtr.Zero)
+		{
 			self._mySeat = WaylandBindings.wl_registry_bind(reg, name, WaylandInterfaces.wl_seat_interface, 1);
+			// Must add a listener — dispatcher segfaults on proxies without listeners
+			if (s_seatCaps == null)
+			{
+				s_seatCaps = SeatCaps;
+				s_seatName = SeatName;
+				var seatL = new WlSeatListener
+				{
+					capabilities = Marshal.GetFunctionPointerForDelegate(s_seatCaps),
+					name = Marshal.GetFunctionPointerForDelegate(s_seatName!),
+				};
+				s_seatLH = GCHandle.Alloc(seatL, GCHandleType.Pinned);
+			}
+			_ = WaylandBindings.wl_proxy_add_listener(self._mySeat, s_seatLH.AddrOfPinnedObject(), IntPtr.Zero);
+		}
 		else if (iface == "wl_data_device_manager" && self._myManager == IntPtr.Zero)
 			self._myManager = WaylandBindings.wl_registry_bind(reg, name, WaylandInterfaces.wl_data_device_manager_interface, 1);
 	}
+	private static void SeatCaps(IntPtr data, IntPtr seat, uint caps) { }
+	private static void SeatName(IntPtr data, IntPtr seat, string name) { }
 	private static void RegRemove(IntPtr data, IntPtr reg, uint name) { }
 
 	private static void DevOffer(IntPtr data, IntPtr dev, IntPtr offer)
