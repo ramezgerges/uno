@@ -388,8 +388,6 @@ internal partial class WaylandXamlRootHost : IXamlRootHost
 
 			if (ret > 0)
 			{
-				Console.Error.Write("[D]");
-				Console.Error.Flush();
 				if (WaylandBindings.wl_display_dispatch(_wlDisplay) < 0)
 				{
 					if (this.Log().IsEnabled(LogLevel.Error))
