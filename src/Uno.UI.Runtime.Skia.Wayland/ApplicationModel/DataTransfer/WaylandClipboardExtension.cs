@@ -151,10 +151,10 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	private string? ReadOffer()
 	{
 		if (_currentOffer == IntPtr.Zero || !_hasSelection) return null;
-		string? mime = null;
-		if (_mimeTypes.Contains("text/plain;charset=utf-8")) mime = "text/plain;charset=utf-8";
-		else if (_mimeTypes.Contains("text/plain")) mime = "text/plain";
-		if (mime == null) return null;
+		// Try text/plain;charset=utf-8 directly (we skip offer listener for now)
+		var mime = _mimeTypes.Count > 0
+			? (_mimeTypes.Contains("text/plain;charset=utf-8") ? "text/plain;charset=utf-8" : _mimeTypes[0])
+			: "text/plain;charset=utf-8";
 
 		var fds = new int[2];
 		if (Pipe(fds) != 0) return null;
@@ -212,7 +212,9 @@ internal class WaylandClipboardExtension : IClipboardExtension
 		if (s._currentOffer != IntPtr.Zero) { WaylandBindings.wl_proxy_destroy(s._currentOffer); s._mimeTypes.Clear(); }
 		s._currentOffer = offer;
 		s._hasSelection = false;
-		_ = WaylandBindings.wl_proxy_add_listener(offer, s._offerPtr, IntPtr.Zero);
+		// DIAGNOSTIC: skip offer listener to test if it causes segfault
+		// Without this, we don't get mime types, but we can try text/plain;charset=utf-8 anyway
+		// _ = WaylandBindings.wl_proxy_add_listener(offer, s._offerPtr, IntPtr.Zero);
 	}
 	private static void DevSel(IntPtr d, IntPtr dev, IntPtr offer)
 	{
