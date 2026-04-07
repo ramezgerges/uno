@@ -88,16 +88,7 @@ internal class WaylandClipboardExtension : IClipboardExtension
 		_offerPtr = Marshal.AllocHGlobal(3 * IntPtr.Size);
 		for (int i = 0; i < 3; i++) Marshal.WriteIntPtr(_offerPtr, i * IntPtr.Size, offerFuncs[i]);
 
-		// Source listener (pre-created, attached in DoCopy)
-		var srcFuncs = new IntPtr[6];
-		srcFuncs[0] = Marshal.GetFunctionPointerForDelegate(_srcTarget ??= SrcTarget);
-		srcFuncs[1] = Marshal.GetFunctionPointerForDelegate(_srcSend ??= SrcSend);
-		srcFuncs[2] = Marshal.GetFunctionPointerForDelegate(_srcCancel ??= SrcCancel);
-		srcFuncs[3] = Marshal.GetFunctionPointerForDelegate(_srcDDP ??= SrcDDP);
-		srcFuncs[4] = Marshal.GetFunctionPointerForDelegate(_srcDF ??= SrcDF);
-		srcFuncs[5] = Marshal.GetFunctionPointerForDelegate(_srcAct ??= SrcAct);
-		_srcPtr = Marshal.AllocHGlobal(6 * IntPtr.Size);
-		for (int i = 0; i < 6; i++) Marshal.WriteIntPtr(_srcPtr, i * IntPtr.Size, srcFuncs[i]);
+		// Source listener will be created lazily in DoCopy
 
 		_ = WaylandBindings.wl_display_roundtrip(wlDisplay);
 		_initialized = true;
