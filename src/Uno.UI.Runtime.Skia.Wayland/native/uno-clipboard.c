@@ -194,7 +194,24 @@ void uno_clipboard_free(char *p) { free(p); }
 /* Expose internal state for C# hybrid approach */
 struct wl_data_device* uno_clipboard_get_device(void) { return g_device; }
 struct wl_data_device_manager* uno_clipboard_get_manager(void) { return g_manager; }
-struct wl_display* uno_clipboard_get_display(void) { return g_display; }
+/* Add a function that creates a device WITHOUT adding a listener */
+struct wl_data_device* uno_clipboard_create_bare_device(struct wl_display *display) {
+    if (!display) return NULL;
+    
+    /* Use existing g_seat and g_manager if already initialized */
+    if (!g_seat || !g_manager) {
+        struct wl_registry *reg = wl_display_get_registry(display);
+        wl_registry_add_listener(reg, &reg_listener, NULL);
+        wl_display_roundtrip(display);
+    }
+    if (!g_seat || !g_manager) return NULL;
+    
+    /* Create device but do NOT add a listener — caller will add their own */
+    return wl_data_device_manager_get_data_device(g_manager, g_seat);
+}
 
-/* Create device only, return it for C# to add listener */
+/* Expose internal state */
 struct wl_data_device* uno_clipboard_get_device_ptr(void) { return g_device; }
+struct wl_data_device_manager* uno_clipboard_get_manager_ptr(void) { return g_manager; }
+struct wl_display* uno_clipboard_get_display_ptr(void) { return g_display; }
+
