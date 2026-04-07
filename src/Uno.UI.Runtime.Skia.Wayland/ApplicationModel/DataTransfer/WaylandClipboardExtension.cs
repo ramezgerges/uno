@@ -142,7 +142,12 @@ internal class WaylandClipboardExtension : IClipboardExtension
 	private static void RegRemove(IntPtr data, IntPtr reg, uint name) { }
 	private static void SeatCaps(IntPtr data, IntPtr seat, uint caps) { Console.Error.WriteLine($"[CB] SeatCaps: {caps}"); }
 	private static void SeatName(IntPtr data, IntPtr seat, string n) { Console.Error.WriteLine($"[CB] SeatName: {n}"); }
-	private static void DevOffer(IntPtr data, IntPtr dev, IntPtr offer) { Console.Error.WriteLine($"[CB] DevOffer: {offer}"); }
+	private static void DevOffer(IntPtr data, IntPtr dev, IntPtr offer)
+	{
+		Console.Error.WriteLine($"[CB] DevOffer: {offer}");
+		var self = Instance;
+		_ = WaylandBindings.wl_proxy_add_listener(offer, self._offerPtr, IntPtr.Zero);
+	}
 	private static void DevEnter(IntPtr d, IntPtr dd, uint serial, IntPtr surface, int x, int y, IntPtr offer) { Console.Error.WriteLine("[CB] DevEnter"); }
 	private static void DevLeave(IntPtr d, IntPtr dd) { Console.Error.WriteLine("[CB] DevLeave"); }
 	private static void DevMotion(IntPtr d, IntPtr dd, uint time, int x, int y) { Console.Error.WriteLine("[CB] DevMotion"); }
