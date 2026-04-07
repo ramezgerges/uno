@@ -1,25 +1,23 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using Windows.ApplicationModel.DataTransfer;
 using Uno.ApplicationModel.DataTransfer;
 
 namespace Uno.WinUI.Runtime.Skia.Wayland;
 
-/// <summary>
-/// Clipboard using libuno-clipboard.so native helper.
-/// The helper uses wayland-scanner generated code for correct protocol handling.
-/// Init creates a persistent wl_data_device on the app's display.
-/// All calls must happen on the event thread.
-/// </summary>
 internal class WaylandClipboardExtension : IClipboardExtension
 {
 	private const string Lib = "libuno-clipboard";
 
-	// Use C helper for protocol work, C# for UI thread integration
+	// Use C helper only for init (creates data device with proper listeners)
+	// and get/set operations. All calls on event thread.
 	[DllImport(Lib)] private static extern int uno_clipboard_init(IntPtr wlDisplay);
 	[DllImport(Lib)] private static extern IntPtr uno_clipboard_get_text();
-	[DllImport(Lib)] private static extern int uno_clipboard_set_text([MarshalAs(UnmanagedType.LPUTF8Str)] string text, uint serial);
+	[DllImport(Lib)] private static extern int uno_clipboard_set_text(
+		[MarshalAs(UnmanagedType.LPUTF8Str)] string text, uint serial);
 	[DllImport(Lib)] private static extern void uno_clipboard_free(IntPtr ptr);
 
 	private static WaylandClipboardExtension? _instance;
@@ -69,7 +67,13 @@ internal class WaylandClipboardExtension : IClipboardExtension
 		}
 	}
 
-	public void Clear() { _copiedText = null; _cachedText = null; ContentChanged?.Invoke(this, EventArgs.Empty); }
+	public void Clear()
+	{
+		_copiedText = null;
+		_cachedText = null;
+		ContentChanged?.Invoke(this, EventArgs.Empty);
+	}
+
 	public void Flush() { }
 
 	public DataPackageView? GetContent()
@@ -77,20 +81,35 @@ internal class WaylandClipboardExtension : IClipboardExtension
 		_pasteRequested = true;
 		for (int i = 0; i < 15 && _pasteRequested; i++) { Thread.Sleep(20); }
 		var text = _cachedText ?? _copiedText;
-		if (text != null) { var p = new DataPackage(); p.SetText(text); return p.GetView(); }
+		if (text != null)
+		{
+			var p = new DataPackage();
+			p.SetText(text);
+			return p.GetView();
+		}
 		return null;
 	}
 
 	public void SetContent(DataPackage? content)
 	{
-		if (content == null) { _copiedText = null; ContentChanged?.Invoke(this, EventArgs.Empty); return; }
+		if (content == null)
+		{
+			_copiedText = null;
+			ContentChanged?.Invoke(this, EventArgs.Empty);
+			return;
+		}
 		try
 		{
 			var view = content.GetView();
 			if (view.Contains(StandardDataFormats.Text))
 			{
 				var text = view.GetTextAsync().AsTask().GetAwaiter().GetResult();
-				if (text != null) { _copiedText = text; _cachedText = null; _pendingCopyText = text; }
+				if (text != null)
+				{
+					_copiedText = text;
+					_cachedText = null;
+					_pendingCopyText = text;
+				}
 			}
 		}
 		catch { }
