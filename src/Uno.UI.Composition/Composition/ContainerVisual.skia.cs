@@ -110,7 +110,7 @@ public partial class ContainerVisual : Visual
 	internal virtual bool HitTest(Point relativeLocation) => new Rect(0, 0, Size.X, Size.Y).Contains(relativeLocation);
 
 	/// <returns>true if a ViewBox exists</returns>
-	internal bool GetArrangeClipPathInElementCoordinateSpace(SKPath dst) // TODO: Do not use SKPath here, bad for perf and prevents usage for IDirectManipulationHandler.IsInBoundsForResume
+	internal bool GetArrangeClipPathInElementCoordinateSpace(SKPathBuilder dst) // TODO: Do not use SKPath here, bad for perf and prevents usage for IDirectManipulationHandler.IsInBoundsForResume
 	{
 		if (LayoutClip is not { isAncestorClip: var isAncestorClip, rect: var rect })
 		{
@@ -125,7 +125,9 @@ public partial class ContainerVisual : Visual
 			var childToParentTransform = Parent!.TotalMatrix * totalMatrixInverted;
 			if (!childToParentTransform.IsIdentity)
 			{
-				dst.Transform(childToParentTransform.ToSKMatrix());
+				using var tempPath = dst.Detach();
+				tempPath.Transform(childToParentTransform.ToSKMatrix());
+				dst.AddPath(tempPath);
 			}
 		}
 
@@ -152,13 +154,13 @@ public partial class ContainerVisual : Visual
 		return rect;
 	}
 
-	private static SKPath _sparePrePaintingClippingPath = new SKPath();
+	private static SKPathBuilder _sparePrePaintingClippingPathBuilder = new SKPathBuilder();
 
-	internal override bool GetPrePaintingClipping(SKPath dst) // TODO: Do not use SKPath here, bad for perf and prevents usage for IDirectManipulationHandler.IsInBoundsForResume
+	internal override bool GetPrePaintingClipping(SKPathBuilder dst) // TODO: Do not use SKPath here, bad for perf and prevents usage for IDirectManipulationHandler.IsInBoundsForResume
 	{
-		var prePaintingClipPath = _sparePrePaintingClippingPath;
+		var prePaintingClipPathBuilder = _sparePrePaintingClippingPathBuilder;
 
-		prePaintingClipPath.Rewind();
+		prePaintingClipPathBuilder.Reset();
 
 		if (base.GetPrePaintingClipping(dst))
 		{
@@ -168,9 +170,12 @@ public partial class ContainerVisual : Visual
 			//	dst.AddRect(clipping.ToSKRect());
 			//}
 
-			if (GetArrangeClipPathInElementCoordinateSpace(prePaintingClipPath))
+			if (GetArrangeClipPathInElementCoordinateSpace(prePaintingClipPathBuilder))
 			{
-				dst.Op(prePaintingClipPath, SKPathOp.Intersect, dst);
+				using var dstPath = dst.Detach();
+				using var clipPath = prePaintingClipPathBuilder.Snapshot();
+				dstPath.Op(clipPath, SKPathOp.Intersect, dstPath);
+				dst.AddPath(dstPath);
 			}
 
 			return true;
@@ -186,10 +191,11 @@ public partial class ContainerVisual : Visual
 			//	return true;
 			//}
 
-			if (GetArrangeClipPathInElementCoordinateSpace(prePaintingClipPath))
+			if (GetArrangeClipPathInElementCoordinateSpace(prePaintingClipPathBuilder))
 			{
 				dst.Reset();
-				dst.AddPath(prePaintingClipPath);
+				using var clipPath = prePaintingClipPathBuilder.Snapshot();
+				dst.AddPath(clipPath);
 
 				return true;
 			}

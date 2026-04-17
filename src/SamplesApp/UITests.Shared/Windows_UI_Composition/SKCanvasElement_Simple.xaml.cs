@@ -98,8 +98,9 @@ public partial class SKCanvasElementImpl : SKCanvasElement
 		var rect = SKRect.Create(10, 10, 100, 160);
 		canvas.DrawRect(rect, paint);
 
-		var oval = new SKPath();
-		oval.AddRoundRect(rect, 20, 20);
+		using var ovalBuilder = new SKPathBuilder();
+		ovalBuilder.AddRoundRect(rect, 20, 20);
+		using var oval = ovalBuilder.Detach();
 		oval.Offset(new SKPoint(40, 80));
 		paint.Color = new SKColor(0xffDB4437);
 		canvas.DrawPath(oval, paint);
@@ -123,10 +124,11 @@ public partial class SKCanvasElementImpl : SKCanvasElement
 		paint.IsAntialias = true;
 		paint.StrokeCap = SKStrokeCap.Round;
 
-		var path = new SKPath();
-		path.MoveTo(10, 10);
-		path.QuadTo(256, 64, 128, 128);
-		path.QuadTo(10, 192, 250, 250);
+		using var pathBuilder = new SKPathBuilder();
+		pathBuilder.MoveTo(10, 10);
+		pathBuilder.QuadTo(256, 64, 128, 128);
+		pathBuilder.QuadTo(10, 192, 250, 250);
+		using var path = pathBuilder.Detach();
 		canvas.DrawPath(path, paint);
 	}
 
@@ -154,15 +156,15 @@ public partial class SKCanvasElementImpl : SKCanvasElement
 		SKPath Star()
 		{
 			const float R = 60.0f, C = 128.0f;
-			var path = new SKPath();
-			path.MoveTo(C + R, C);
+			using var builder = new SKPathBuilder();
+			builder.MoveTo(C + R, C);
 			for (var i = 1; i < 15; ++i)
 			{
 				var a = 0.44879895f * i;
 				var r = R + R * (i % 2);
-				path.LineTo((float)(C + r * Math.Cos(a)), (float)(C + r * Math.Sin(a)));
+				builder.LineTo((float)(C + r * Math.Cos(a)), (float)(C + r * Math.Sin(a)));
 			}
-			return path;
+			return builder.Detach();
 		}
 	}
 }

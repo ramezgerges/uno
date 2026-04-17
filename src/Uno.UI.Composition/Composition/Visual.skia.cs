@@ -22,8 +22,9 @@ namespace Microsoft.UI.Composition;
 
 public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 {
-	private static readonly ObjectPool<SKPath> _pathPool = new(() => new SKPath());
-	private static readonly SKPath _spareRenderPath = new SKPath();
+	private static readonly ObjectPool<SKPathBuilder> _pathPool = new(() => new SKPathBuilder());
+	private static readonly SKPathBuilder _spareRenderPathBuilder = new SKPathBuilder();
+
 
 	private static readonly IPrivateSessionFactory _factory = new PaintingSession.SessionFactory();
 	private static readonly List<Visual> s_emptyList = new List<Visual>();
@@ -363,12 +364,13 @@ public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 		{
 			var canvas = session.Canvas;
 
-			var preClip = _spareRenderPath;
+			var preClipBuilder = _spareRenderPathBuilder;
 
-			preClip.Rewind();
+			preClipBuilder.Reset();
 
-			if (GetPrePaintingClipping(preClip))
+			if (GetPrePaintingClipping(preClipBuilder))
 			{
+				using var preClip = preClipBuilder.Snapshot();
 				canvas.ClipPath(preClip, antialias: true);
 			}
 
@@ -538,19 +540,23 @@ public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 			return;
 		}
 
-		var localClipCombinedByClipFromParent = _pathPool.Allocate();
-		using var rentedArrayDisposable = new DisposableStruct<SKPath>(static path => _pathPool.Free(path), localClipCombinedByClipFromParent);
-		localClipCombinedByClipFromParent.Rewind();
+		var localClipBuilder = _pathPool.Allocate();
+		using var rentedArrayDisposable = new DisposableStruct<SKPathBuilder>(static path => _pathPool.Free(path), localClipBuilder);
+		localClipBuilder.Reset();
 
-		if (GetPrePaintingClipping(_spareRenderPath))
+		var prePaintBuilder = _spareRenderPathBuilder;
+		prePaintBuilder.Reset();
+		if (GetPrePaintingClipping(prePaintBuilder))
 		{
-			localClipCombinedByClipFromParent.AddPath(_spareRenderPath);
+			using var prePaintPath = prePaintBuilder.Snapshot();
+			localClipBuilder.AddPath(prePaintPath);
 		}
 		else
 		{
-			localClipCombinedByClipFromParent.AddRect(new SKRect(0, 0, Size.X, Size.Y));
+			localClipBuilder.AddRect(new SKRect(0, 0, Size.X, Size.Y));
 		}
-		localClipCombinedByClipFromParent.Transform(TotalMatrix.ToSKMatrix(), localClipCombinedByClipFromParent);
+		using var localClipCombinedByClipFromParent = localClipBuilder.Snapshot();
+		localClipCombinedByClipFromParent.Transform(TotalMatrix.ToSKMatrix());
 		localClipCombinedByClipFromParent.Op(clipFromParent, SKPathOp.Intersect, localClipCombinedByClipFromParent);
 
 		if (IsNativeHostVisual || CanPaint())
@@ -582,17 +588,22 @@ public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 		}
 		else
 		{
-			dst.Rewind();
-			dst.AddRect(InfiniteClipRect);
+			dst.Reset();
+			using var initBuilder = new SKPathBuilder();
+			initBuilder.AddRect(InfiniteClipRect);
+			using var initPath = initBuilder.Detach();
+			initPath.Transform(SKMatrix.Identity, dst);
 		}
 
-		var localPath = _pathPool.Allocate();
-		using var localPathDisposable = new DisposableStruct<SKPath>(static path => _pathPool.Free(path), localPath);
+		var localBuilder = _pathPool.Allocate();
+		using var localBuilderDisposable = new DisposableStruct<SKPathBuilder>(static b => _pathPool.Free(b), localBuilder);
+		localBuilder.Reset();
 
 		var totalMatrix = TotalMatrix.ToSKMatrix();
-		if (GetPrePaintingClipping(localPath))
+		if (GetPrePaintingClipping(localBuilder))
 		{
 			// The local clip is in local coordinates. We need to transform it to root coordinates.
+			using var localPath = localBuilder.Snapshot();
 			localPath.Transform(in totalMatrix);
 			dst.Op(localPath, SKPathOp.Intersect, dst);
 		}
@@ -632,7 +643,7 @@ public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 		return total;
 	}
 
-	internal virtual bool GetPrePaintingClipping(SKPath dst)
+	internal virtual bool GetPrePaintingClipping(SKPathBuilder dst)
 	{
 		// Apply the clipping defined on the element
 		// (Only the Clip property, clipping applied by parent for layout constraints reason it's managed by the ContainerVisual through the LayoutClip)

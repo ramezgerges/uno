@@ -7,17 +7,17 @@ namespace Microsoft.UI.Xaml.Media
 	{
 		internal override SKPath GetSKPath()
 		{
-			var path = new SKPath();
+			using var builder = new SKPathBuilder();
 
 			foreach (var geometry in Children)
 			{
 				// Use GetTransformedSKPath so each child's own Transform is applied
 				var geometryPath = geometry.GetTransformedSKPath();
-				path.AddPath(geometryPath);
+				builder.AddPath(geometryPath);
 			}
 
-			path.FillType = FillRule.ToSkiaFillType();
-			return path;
+			builder.FillType = FillRule.ToSkiaFillType();
+			return builder.Detach();
 		}
 	}
 }

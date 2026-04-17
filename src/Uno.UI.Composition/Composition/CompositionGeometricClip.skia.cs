@@ -42,7 +42,6 @@ partial class CompositionGeometricClip
 				if (!TransformMatrix.IsIdentity)
 				{
 					var transformedPath = _spareTransformedPath;
-					transformedPath.Rewind();
 					path.Transform(TransformMatrix.ToSKMatrix(), transformedPath);
 					path = transformedPath;
 				}

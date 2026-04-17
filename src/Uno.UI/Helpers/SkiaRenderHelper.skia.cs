@@ -70,7 +70,7 @@ internal static class SkiaRenderHelper
 		canvas.Flush();
 	}
 
-	private static readonly SKPath _spareParentClipPath = new();
+	private static readonly SKPathBuilder _spareParentClipPathBuilder = new();
 
 	/// <summary>
 	/// Does a rendering cycle and returns a path that represents the visible area of the native views.
@@ -81,9 +81,9 @@ internal static class SkiaRenderHelper
 
 		var rect = new SKRect(0f, 0f, width, height);
 
-		var parentClipPath = _spareParentClipPath;
-		parentClipPath.Rewind();
-		parentClipPath.AddRect(rect);
+		_spareParentClipPathBuilder.Reset();
+		_spareParentClipPathBuilder.AddRect(rect);
+		using var parentClipPath = _spareParentClipPathBuilder.Snapshot();
 
 		var nativeVisualsInZOrder = new List<Visual>();
 		rootVisual.GetNativeViewPathAndZOrder(parentClipPath, clipPath, nativeVisualsInZOrder);
@@ -94,8 +94,9 @@ internal static class SkiaRenderHelper
 		}
 		else
 		{
-			var invertedPath = new SKPath();
-			invertedPath.AddRect(rect);
+			using var invertedBuilder = new SKPathBuilder();
+			invertedBuilder.AddRect(rect);
+			var invertedPath = invertedBuilder.Detach();
 			invertedPath.Op(clipPath, SKPathOp.Difference, invertedPath);
 
 			clipPath.Dispose();
@@ -112,8 +113,9 @@ internal static class SkiaRenderHelper
 		}
 		else
 		{
-			var result = new SKPath();
-			result.AddRect(new SKRect(0f, 0f, width, height));
+			using var builder = new SKPathBuilder();
+			builder.AddRect(new SKRect(0f, 0f, width, height));
+			var result = builder.Detach();
 			result.Op(_emptyClipPath, SKPathOp.Difference, result);
 
 			_invertedClipPathWidth = width;

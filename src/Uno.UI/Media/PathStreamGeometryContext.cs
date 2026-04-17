@@ -16,6 +16,7 @@ using Android.Graphics.Drawables.Shapes;
 using Path = Android.Graphics.Path;
 using Uno.UI;
 #elif __SKIA__
+using SkiaSharp;
 using Path = SkiaSharp.SKPath;
 #else
 using Path = System.Object;
@@ -27,7 +28,11 @@ namespace Uno.Media
 	{
 		private readonly List<Point> _points = new List<Point>();
 		private readonly StreamGeometry _owner;
+#if __SKIA__
+		private SKPathBuilder _skiaPathBuilder = new SKPathBuilder();
+#else
 		private Path bezierPath = new Path();
+#endif
 
 		internal PathStreamGeometryContext(StreamGeometry owner)
 		{
@@ -41,7 +46,7 @@ namespace Uno.Media
 #elif __ANDROID__
 			bezierPath.MoveTo((float)startPoint.X, (float)startPoint.Y);
 #elif __SKIA__
-			bezierPath.MoveTo(new SkiaSharp.SKPoint((float)startPoint.X, (float)startPoint.Y));
+			_skiaPathBuilder.MoveTo(new SKPoint((float)startPoint.X, (float)startPoint.Y));
 #endif
 
 			_points.Add(startPoint);
@@ -54,7 +59,7 @@ namespace Uno.Media
 #elif __ANDROID__
 			bezierPath.LineTo((float)point.X, (float)point.Y);
 #elif __SKIA__
-			bezierPath.LineTo((float)point.X, (float)point.Y);
+			_skiaPathBuilder.LineTo((float)point.X, (float)point.Y);
 #endif
 
 			_points.Add(point);
@@ -67,7 +72,7 @@ namespace Uno.Media
 #elif __ANDROID__
 			bezierPath.CubicTo((float)point1.X, (float)point1.Y, (float)point2.X, (float)point2.Y, (float)point3.X, (float)point3.Y);
 #elif __SKIA__
-			bezierPath.CubicTo((float)point1.X, (float)point1.Y, (float)point2.X, (float)point2.Y, (float)point3.X, (float)point3.Y);
+			_skiaPathBuilder.CubicTo((float)point1.X, (float)point1.Y, (float)point2.X, (float)point2.Y, (float)point3.X, (float)point3.Y);
 #endif
 			_points.Add(point3);
 		}
@@ -79,7 +84,7 @@ namespace Uno.Media
 #elif __ANDROID__
 			bezierPath.QuadTo((float)point1.X, (float)point1.Y, (float)point2.X, (float)point2.Y);
 #elif __SKIA__
-			bezierPath.QuadTo((float)point1.X, (float)point1.Y, (float)point2.X, (float)point2.Y);
+			_skiaPathBuilder.QuadTo((float)point1.X, (float)point1.Y, (float)point2.X, (float)point2.Y);
 #endif
 
 			_points.Add(point2);
@@ -148,8 +153,8 @@ namespace Uno.Media
 				sweepAngle -= 360;
 			}
 
-			bezierPath.ArcTo(
-				new SkiaSharp.SKRect((float)circle.Left, (float)circle.Top, (float)circle.Right, (float)circle.Bottom),
+			_skiaPathBuilder.ArcTo(
+				new SKRect((float)circle.Left, (float)circle.Top, (float)circle.Right, (float)circle.Bottom),
 				(float)startAngle,
 				(float)sweepAngle,
 				false
@@ -205,7 +210,13 @@ namespace Uno.Media
 
 		public override void SetClosedState(bool closed)
 		{
-			if (bezierPath != null)
+			if (
+#if __SKIA__
+				_skiaPathBuilder != null
+#else
+				bezierPath != null
+#endif
+			)
 			{
 				if (closed)
 				{
@@ -214,7 +225,7 @@ namespace Uno.Media
 #elif __ANDROID__
 					bezierPath.Close();
 #elif __SKIA__
-					bezierPath.Close();
+					_skiaPathBuilder.Close();
 #elif __WASM__
 					// TODO: In most cases, the path is handled by the browser.
 					// But it might still be possible to hit this code path on Wasm?
@@ -230,7 +241,12 @@ namespace Uno.Media
 
 		public override void Dispose()
 		{
+#if __SKIA__
+			_owner.Close(_skiaPathBuilder.Detach());
+			_skiaPathBuilder.Dispose();
+#else
 			_owner.Close(bezierPath);
+#endif
 		}
 	}
 }

@@ -25,9 +25,9 @@ namespace Microsoft.UI.Xaml.Shapes
 
 		private SkiaGeometrySource2D GetGeometry(Rect renderingArea)
 		{
-			var path = new SKPath();
-			path.AddOval(new SKRect((float)renderingArea.X, (float)renderingArea.Y, (float)renderingArea.Right, (float)renderingArea.Bottom));
-			var geometry = new SkiaGeometrySource2D(path);
+			using var builder = new SKPathBuilder();
+			builder.AddOval(new SKRect((float)renderingArea.X, (float)renderingArea.Y, (float)renderingArea.Right, (float)renderingArea.Bottom));
+			var geometry = new SkiaGeometrySource2D(builder.Detach());
 
 			return geometry;
 		}

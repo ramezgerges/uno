@@ -27,7 +27,8 @@ internal class Win32NativeElementHostingExtension : ContentPresenter.INativeElem
 	private static readonly SKPoint[] _conicPoints = new SKPoint[32 * 3]; // 3 points per quad
 
 	private readonly ContentPresenter _presenter;
-	private readonly SKPath _tempPath = new();
+	private readonly SKPathBuilder _tempPathBuilder = new();
+	private SKPath _tempPath = new();
 	private Rect _lastArrangeRect;
 	private string? _lastFinalSvgClipPath;
 	private HRGN _lastClipHrgn;
@@ -101,8 +102,10 @@ internal class Win32NativeElementHostingExtension : ContentPresenter.INativeElem
 
 	private unsafe void OnRenderingNegativePathReevaluated(object? sender, SKPath path)
 	{
-		_tempPath.Rewind();
-		_tempPath.AddRect(_lastArrangeRect.ToSKRect());
+		_tempPathBuilder.Reset();
+		_tempPathBuilder.AddRect(_lastArrangeRect.ToSKRect());
+		_tempPath.Dispose();
+		_tempPath = _tempPathBuilder.Detach();
 		path.Op(_tempPath, SKPathOp.Intersect, _tempPath);
 		_tempPath.Transform(SKMatrix.CreateTranslation((float)-_lastArrangeRect.X, (float)-_lastArrangeRect.Y));
 

@@ -908,21 +908,22 @@ internal readonly partial struct UnicodeText : IParsedText
 					var amplitude = 2 * scale;
 					var yOffset = 2 * scale;
 
-					var p = new SKPath();
+					using var pb = new SKPathBuilder();
 					var underlineY = y + line.baselineOffset + yOffset;
 					var underlineLeftX = unalignedX + alignmentOffset;
 					var underlineRightX = underlineLeftX + cluster.Value.width;
-					p.MoveTo(underlineLeftX, underlineY);
+					pb.MoveTo(underlineLeftX, underlineY);
 					var x = underlineLeftX;
 					var up = true;
 					while (x + step < underlineRightX)
 					{
 						x += step;
 						var yWave = underlineY + (up ? -amplitude : amplitude);
-						p.LineTo(x, yWave);
+						pb.LineTo(x, yWave);
 						up = !up;
 					}
-					p.LineTo(underlineRightX, underlineY);
+					pb.LineTo(underlineRightX, underlineY);
+					var p = pb.Detach();
 
 					spellCheckUnderlines.Add((p, scale));
 				}

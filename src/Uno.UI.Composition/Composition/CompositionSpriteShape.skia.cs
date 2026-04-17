@@ -12,7 +12,6 @@ namespace Microsoft.UI.Composition
 	public partial class CompositionSpriteShape : CompositionShape
 	{
 		private static readonly SKPaint _spareHitTestPaint = new();
-		private static readonly SKPath _spareHitTestPath = new();
 		private static readonly SKPoint[] _spareMiterPoints = new SKPoint[4];
 		// We don't call SKPaint.Reset() after usage, so make sure
 		// that only SKPaint.Color is being set
@@ -42,7 +41,8 @@ namespace Microsoft.UI.Composition
 		internal override bool CanPaint() => (FillBrush?.CanPaint() ?? false) || (StrokeBrush?.CanPaint() ?? false);
 
 		private static readonly SKPaint _sparePaint = new SKPaint();
-		private static readonly SKPath _sparePath = new SKPath();
+		private static readonly SKPathBuilder _sparePathBuilder = new SKPathBuilder();
+		private static readonly SKPathBuilder _spareHitTestPathBuilder = new SKPathBuilder();
 
 		internal override void Paint(in Visual.PaintingSession session)
 		{
@@ -58,9 +58,10 @@ namespace Microsoft.UI.Composition
 						fillPaint.PathEffect = SKPathEffect.CreateTrim(Geometry.TrimStart, Geometry.TrimEnd);
 					}
 
-					var fillPath = _sparePath;
-					fillPath.Rewind();
-					finalFillGeometryWithTransformations.GetFillPath(fillPaint, fillPath);
+					var fillPathBuilder = _sparePathBuilder;
+					fillPathBuilder.Reset();
+					finalFillGeometryWithTransformations.GetFillPath(fillPaint, fillPathBuilder);
+					using var fillPath = fillPathBuilder.Snapshot();
 
 					session.Canvas.Save();
 					session.Canvas.ClipPath(fillPath, antialias: true);
@@ -147,15 +148,15 @@ namespace Microsoft.UI.Composition
 					// On Windows, the stroke is simply 1px, it doesn't scale with the height.
 					// So, to get a correct stroke geometry, we must apply the transformations first.
 
-					var strokeFillPath = _sparePath;
-					strokeFillPath.Rewind();
+					var strokeFillPathBuilder = _sparePathBuilder;
+					strokeFillPathBuilder.Reset();
 					// Get the stroke geometry, after scaling has been applied.
-					geometryWithTransformations.GetFillPath(strokePaint, strokeFillPath);
+					geometryWithTransformations.GetFillPath(strokePaint, strokeFillPathBuilder);
 
 					// Add custom cap geometry for Triangle caps or different start/end caps
 					if (needsCustomCaps && StrokeDashArray is not { Count: > 0 })
 					{
-						AddCustomCaps(strokeFillPath, geometryWithTransformations.Geometry, StrokeThickness, StrokeStartCap, StrokeEndCap);
+						AddCustomCaps(strokeFillPathBuilder, geometryWithTransformations.Geometry, StrokeThickness, StrokeStartCap, StrokeEndCap);
 					}
 
 					// Fix endpoint caps for dashed strokes: WinUI uses StartCap/EndCap at path
@@ -166,7 +167,7 @@ namespace Microsoft.UI.Composition
 							|| StrokeStartCap != CompositionStrokeCap.Flat
 							|| StrokeEndCap != CompositionStrokeCap.Flat))
 					{
-						FixDashEndpointCaps(strokeFillPath, geometryWithTransformations.Geometry,
+						FixDashEndpointCaps(strokeFillPathBuilder, geometryWithTransformations.Geometry,
 							StrokeThickness, StrokeDashCap, StrokeStartCap, StrokeEndCap,
 							dashValues, StrokeDashOffset * StrokeThickness);
 					}
@@ -174,7 +175,7 @@ namespace Microsoft.UI.Composition
 					// Add Triangle cap geometry at internal dash boundaries.
 					if (dashValues is not null && StrokeDashCap == CompositionStrokeCap.Triangle)
 					{
-						AddInternalTriangleDashCaps(strokeFillPath, geometryWithTransformations.Geometry,
+						AddInternalTriangleDashCaps(strokeFillPathBuilder, geometryWithTransformations.Geometry,
 							StrokeThickness, dashValues, StrokeDashOffset * StrokeThickness);
 					}
 
@@ -183,10 +184,11 @@ namespace Microsoft.UI.Composition
 					// Add clipped miter trapezoids for vertices where Skia produced a bevel.
 					if (StrokeLineJoin == CompositionStrokeLineJoin.Miter)
 					{
-						AddClippedMiterJoints(strokeFillPath, geometryWithTransformations.Geometry,
+						AddClippedMiterJoints(strokeFillPathBuilder, geometryWithTransformations.Geometry,
 							StrokeThickness, StrokeMiterLimit);
 					}
 
+					using var strokeFillPath = strokeFillPathBuilder.Snapshot();
 					session.Canvas.Save();
 					session.Canvas.ClipPath(strokeFillPath, antialias: true);
 					stroke.Paint(session.Canvas, session.Opacity, strokeFillPath.Bounds);
@@ -284,15 +286,15 @@ namespace Microsoft.UI.Composition
 						strokePaint.StrokeCap = ToSKStrokeCap(StrokeEndCap);
 					}
 
-					var hitTestStrokeFillPath = _spareHitTestPath;
+					var hitTestStrokeFillPathBuilder = _spareHitTestPathBuilder;
 
-					hitTestStrokeFillPath.Rewind();
+					hitTestStrokeFillPathBuilder.Reset();
 
-					geometryWithTransformations.GetFillPath(strokePaint, hitTestStrokeFillPath);
+					geometryWithTransformations.GetFillPath(strokePaint, hitTestStrokeFillPathBuilder);
 
 					if (needsCustomCaps && StrokeDashArray is not { Count: > 0 })
 					{
-						AddCustomCaps(hitTestStrokeFillPath, geometryWithTransformations.Geometry, StrokeThickness, StrokeStartCap, StrokeEndCap);
+						AddCustomCaps(hitTestStrokeFillPathBuilder, geometryWithTransformations.Geometry, StrokeThickness, StrokeStartCap, StrokeEndCap);
 					}
 
 					// Fix endpoint caps for dashed strokes (mirror of Paint logic)
@@ -301,7 +303,7 @@ namespace Microsoft.UI.Composition
 							|| StrokeStartCap != CompositionStrokeCap.Flat
 							|| StrokeEndCap != CompositionStrokeCap.Flat))
 					{
-						FixDashEndpointCaps(hitTestStrokeFillPath, geometryWithTransformations.Geometry,
+						FixDashEndpointCaps(hitTestStrokeFillPathBuilder, geometryWithTransformations.Geometry,
 							StrokeThickness, StrokeDashCap, StrokeStartCap, StrokeEndCap,
 							dashValues, StrokeDashOffset * StrokeThickness);
 					}
@@ -309,17 +311,18 @@ namespace Microsoft.UI.Composition
 					// Add Triangle cap geometry at internal dash boundaries (mirror of Paint logic).
 					if (dashValues is not null && StrokeDashCap == CompositionStrokeCap.Triangle)
 					{
-						AddInternalTriangleDashCaps(hitTestStrokeFillPath, geometryWithTransformations.Geometry,
+						AddInternalTriangleDashCaps(hitTestStrokeFillPathBuilder, geometryWithTransformations.Geometry,
 							StrokeThickness, dashValues, StrokeDashOffset * StrokeThickness);
 					}
 
 					// WinUI's Miter join uses miter-clip (see Paint() comment).
 					if (StrokeLineJoin == CompositionStrokeLineJoin.Miter)
 					{
-						AddClippedMiterJoints(hitTestStrokeFillPath, geometryWithTransformations.Geometry,
+						AddClippedMiterJoints(hitTestStrokeFillPathBuilder, geometryWithTransformations.Geometry,
 							StrokeThickness, StrokeMiterLimit);
 					}
 
+					using var hitTestStrokeFillPath = hitTestStrokeFillPathBuilder.Snapshot();
 					if (hitTestStrokeFillPath.Contains((float)point.X, (float)point.Y))
 					{
 						return true;
@@ -351,7 +354,7 @@ namespace Microsoft.UI.Composition
 		/// Adds custom cap geometry to the stroke fill path for cases where native SKPaint.StrokeCap
 		/// is insufficient (different start/end caps, or Triangle cap type).
 		/// </summary>
-		private static void AddCustomCaps(SKPath fillPath, SKPath originalGeometry, float strokeWidth, CompositionStrokeCap startCap, CompositionStrokeCap endCap)
+		private static void AddCustomCaps(SKPathBuilder fillPath, SKPath originalGeometry, float strokeWidth, CompositionStrokeCap startCap, CompositionStrokeCap endCap)
 		{
 			using var measure = new SKPathMeasure(originalGeometry, false);
 			do
@@ -398,7 +401,7 @@ namespace Microsoft.UI.Composition
 		/// endpoints by removing the incorrect DashCap protrusion and adding the correct cap.
 		/// </summary>
 		private static void FixDashEndpointCaps(
-			SKPath fillPath,
+			SKPathBuilder fillPath,
 			SKPath originalGeometry,
 			float strokeWidth,
 			CompositionStrokeCap dashCap,
@@ -432,10 +435,11 @@ namespace Microsoft.UI.Composition
 					if (dashCap != CompositionStrokeCap.Flat)
 					{
 						using var cutter = BuildHalfPlaneCutter(startPos, backDir, strokeWidth);
-						using var result = new SKPath();
-						if (fillPath.Op(cutter, SKPathOp.Difference, result))
+						using var currentPath = fillPath.Snapshot();
+						using var result = currentPath.Op(cutter, SKPathOp.Difference);
+						if (result != null)
 						{
-							fillPath.Rewind();
+							fillPath.Reset();
 							fillPath.AddPath(result);
 						}
 					}
@@ -464,10 +468,11 @@ namespace Microsoft.UI.Composition
 							if (dashCap != CompositionStrokeCap.Flat)
 							{
 								using var cutter = BuildHalfPlaneCutter(endPos, endTan, strokeWidth);
-								using var result = new SKPath();
-								if (fillPath.Op(cutter, SKPathOp.Difference, result))
+								using var currentPath = fillPath.Snapshot();
+								using var result = currentPath.Op(cutter, SKPathOp.Difference);
+								if (result != null)
 								{
-									fillPath.Rewind();
+									fillPath.Reset();
 									fillPath.AddPath(result);
 								}
 							}
@@ -514,7 +519,7 @@ namespace Microsoft.UI.Composition
 		/// Path start/end boundaries are excluded for open contours (handled by FixDashEndpointCaps).
 		/// </summary>
 		private static void AddInternalTriangleDashCaps(
-			SKPath fillPath,
+			SKPathBuilder fillPath,
 			SKPath originalGeometry,
 			float strokeWidth,
 			float[] dashValues,
@@ -620,9 +625,9 @@ namespace Microsoft.UI.Composition
 			var p3 = new SKPoint(position.X - normal.X * size + direction.X * size, position.Y - normal.Y * size + direction.Y * size);
 			var p4 = new SKPoint(position.X - normal.X * size, position.Y - normal.Y * size);
 
-			var path = new SKPath();
-			path.AddPoly(new[] { p1, p2, p3, p4 }, close: true);
-			return path;
+			var builder = new SKPathBuilder();
+			builder.AddPoly(new[] { p1, p2, p3, p4 }, close: true);
+			return builder.Detach();
 		}
 
 		/// <summary>
@@ -752,7 +757,7 @@ namespace Microsoft.UI.Composition
 
 			if (capType == CompositionStrokeCap.Round)
 			{
-				var path = new SKPath();
+				var builder = new SKPathBuilder();
 				// Build a semicircle oriented in the cap direction
 				var startAngle = (float)(Math.Atan2(normal.Y, normal.X) * 180 / Math.PI);
 				var rect = new SKRect(
@@ -760,30 +765,30 @@ namespace Microsoft.UI.Composition
 					position.Y - halfWidth,
 					position.X + halfWidth,
 					position.Y + halfWidth);
-				path.AddArc(rect, startAngle, -180);
-				path.Close();
-				return path;
+				builder.AddArc(rect, startAngle, -180);
+				builder.Close();
+				return builder.Detach();
 			}
 			else if (capType == CompositionStrokeCap.Square)
 			{
-				var path = new SKPath();
+				var builder = new SKPathBuilder();
 				// Rectangle extending halfWidth beyond endpoint in direction
 				var p1 = new SKPoint(position.X + normal.X * halfWidth, position.Y + normal.Y * halfWidth);
 				var p2 = new SKPoint(p1.X + direction.X * halfWidth, p1.Y + direction.Y * halfWidth);
 				var p3 = new SKPoint(p2.X - normal.X * strokeWidth, p2.Y - normal.Y * strokeWidth);
 				var p4 = new SKPoint(position.X - normal.X * halfWidth, position.Y - normal.Y * halfWidth);
-				path.AddPoly(new[] { p1, p2, p3, p4 }, close: true);
-				return path;
+				builder.AddPoly(new[] { p1, p2, p3, p4 }, close: true);
+				return builder.Detach();
 			}
 			else if (capType == CompositionStrokeCap.Triangle)
 			{
-				var path = new SKPath();
+				var builder = new SKPathBuilder();
 				// Isoceles triangle: base perpendicular to direction at endpoint, apex at halfWidth in direction
 				var base1 = new SKPoint(position.X + normal.X * halfWidth, position.Y + normal.Y * halfWidth);
 				var apex = new SKPoint(position.X + direction.X * halfWidth, position.Y + direction.Y * halfWidth);
 				var base2 = new SKPoint(position.X - normal.X * halfWidth, position.Y - normal.Y * halfWidth);
-				path.AddPoly(new[] { base1, apex, base2 }, close: true);
-				return path;
+				builder.AddPoly(new[] { base1, apex, base2 }, close: true);
+				return builder.Detach();
 			}
 
 			return null;
@@ -796,7 +801,7 @@ namespace Microsoft.UI.Composition
 		/// the miter exceeded the limit and adds the clipped miter geometry.
 		/// </summary>
 		private static void AddClippedMiterJoints(
-			SKPath fillPath,
+			SKPathBuilder fillPath,
 			SKPath originalGeometry,
 			float strokeWidth,
 			float miterLimit)
@@ -994,7 +999,7 @@ namespace Microsoft.UI.Composition
 		/// miter trapezoid. Matches WinUI's DoLimitedMiter() algorithm from strokefigure.cpp.
 		/// </summary>
 		private static void TryAddMiterClipTrapezoid(
-			SKPath fillPath,
+			SKPathBuilder fillPath,
 			SKPoint vertex,
 			SKPoint dIn,
 			SKPoint dOut,
