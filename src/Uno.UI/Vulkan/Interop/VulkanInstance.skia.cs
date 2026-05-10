@@ -40,7 +40,11 @@ internal class VulkanInstance : IVulkanInstance
 		var appInfo = new VkApplicationInfo()
 		{
 			sType = VkStructureType.VK_STRUCTURE_TYPE_APPLICATION_INFO,
-			apiVersion = VulkanHelpers.MakeVersion(1, 1, 0),
+			// Skia Graphite's Vulkan path requires API 1.3 (per VulkanCaps in
+			// externals/skia/src/gpu/graphite/vk). Older Skia/Ganesh worked at
+			// 1.1, but Graphite uses synchronization2 / dynamic-rendering paths
+			// that are core in 1.3.
+			apiVersion = VulkanHelpers.MakeVersion(1, 3, 0),
 			applicationVersion = VulkanHelpers.MakeVersion(1, 0, 0),
 			engineVersion = VulkanHelpers.MakeVersion(1, 0, 0),
 			pApplicationName = name,

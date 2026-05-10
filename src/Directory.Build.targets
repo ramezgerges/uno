@@ -74,8 +74,8 @@
 	<PropertyGroup>
 		<MSTestVersion>4.2.1</MSTestVersion>
 		<MicrosoftTestingPlatformVersion>2.2.1</MicrosoftTestingPlatformVersion>
-		<SkiaSharpVersion>3.119.0</SkiaSharpVersion>
-		<HarfbuzzSharpVersion>8.3.1.1</HarfbuzzSharpVersion>
+		<SkiaSharpVersion>4.147.0-graphite-local-rebased</SkiaSharpVersion>
+		<HarfbuzzSharpVersion>8.3.1.6-graphite-local-rebased</HarfbuzzSharpVersion>
 		<UnoICUVersion>77.2.0-dev.14</UnoICUVersion>
 	</PropertyGroup>
 

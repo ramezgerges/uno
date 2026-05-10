@@ -73,8 +73,8 @@ internal partial class Win32WindowWrapper
 		{
 			// Acquire the Vulkan device lock for the duration of the frame.
 			// This prevents concurrent Vulkan access between Skia and our presentation code.
+			// Graphite has no equivalent of GRContext.ResetContext.
 			_deviceLock = _vulkanContext.Device?.Lock();
-			_vulkanContext.GrContext?.ResetContext();
 			_vulkanContext.EnsureCachedSurface();
 		}
 
@@ -93,7 +93,6 @@ internal partial class Win32WindowWrapper
 			// stale reference, resize the render image, and create a fresh surface.
 			_vulkanContext.InvalidateCachedSurface();
 			_vulkanContext.ResizeRenderImage(Math.Max(width, 1), Math.Max(height, 1));
-			_vulkanContext.GrContext?.ResetContext();
 			_vulkanContext.EnsureCachedSurface();
 
 			if (_vulkanContext.CachedSkSurface == null)
@@ -108,16 +107,14 @@ internal partial class Win32WindowWrapper
 
 		public void CopyPixels(int width, int height)
 		{
-			if (_vulkanContext.CachedSkSurface == null || _vulkanContext.GrContext == null)
+			if (_vulkanContext.CachedSkSurface == null || _vulkanContext.GraphiteContext == null)
 				return;
-
-			// Flush Skia commands to the Vulkan intermediate image
-			_vulkanContext.CachedSkSurface.Canvas.Flush();
-			_vulkanContext.GrContext.Flush();
 
 			if (!_skipPresent)
 			{
-				// Blit intermediate image to swapchain and present
+				// BlitAndPresent does the Snap+InsertRecording+Submit internally
+				// before issuing the swapchain blit, so no separate canvas/context
+				// flush pair is needed here on the Graphite path.
 				_vulkanContext.BlitAndPresent();
 			}
 			_skipPresent = false;

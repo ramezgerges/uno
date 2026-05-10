@@ -262,6 +262,11 @@
 		<!-- Disable warning about cross platform call sites -->
 		<NoWarn>$(NoWarn);CA1416</NoWarn>
 
+		<!-- SkiaSharp 4.x deprecated several SKPath methods (Rewind/AddPath/AddRect/etc.) in
+		     favor of SKPathBuilder. We're testing against the local 4.147 build for FR-013/020
+		     verification, not migrating Uno's source — silence the obsolete warnings here. -->
+		<NoWarn>$(NoWarn);CS0618</NoWarn>
+
 		<!-- Disable warning about wasm/skia long paths -->
 		<NoWarn>$(NoWarn);NU5123</NoWarn>
 		

@@ -66,7 +66,11 @@ internal class VulkanImageBase : IDisposable
 		UsageFlags = VkImageUsageFlags.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
 		                   | VkImageUsageFlags.VK_IMAGE_USAGE_TRANSFER_DST_BIT
 		                   | VkImageUsageFlags.VK_IMAGE_USAGE_TRANSFER_SRC_BIT
-		                   | VkImageUsageFlags.VK_IMAGE_USAGE_SAMPLED_BIT;
+		                   | VkImageUsageFlags.VK_IMAGE_USAGE_SAMPLED_BIT
+		                   // Skia Graphite's VulkanCaps requires INPUT_ATTACHMENT for
+		                   // renderable formats (used by LoadOp::Load / render-pass plumbing).
+		                   // See externals/skia/src/gpu/graphite/vk/VulkanCaps.cpp.
+		                   | VkImageUsageFlags.VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
 	}
 
 	protected virtual VkDeviceMemory CreateMemory(VkImage image, ulong size, uint memoryTypeBits)

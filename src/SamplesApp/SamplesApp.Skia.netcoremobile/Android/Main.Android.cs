@@ -106,6 +106,12 @@ namespace SamplesApp.Droid
 			{
 				FeatureConfiguration.Rendering.UseOpenGLOnSkiaAndroid = false;
 			}
+
+			// Opt in to the Vulkan + Graphite path on Android. Mirrors the
+			// UNO_RENDERER_VULKAN env-var hook in Program.cs (X11/Win32 desktop).
+			// Falls back to OpenGL ES if the device does not advertise Vulkan
+			// (handled in ApplicationActivity.CreateRenderView).
+			FeatureConfiguration.Rendering.UseVulkanOnSkiaAndroid = true;
 		}
 
 		public override void OnCreate()

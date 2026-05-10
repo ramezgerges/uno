@@ -59,7 +59,6 @@ internal class X11VulkanRenderer : X11Renderer
 		_needsFullResize = true;
 		_vulkanContext.InvalidateCachedSurface();
 		_vulkanContext.ResizeRenderImage(Math.Max(width, 1), Math.Max(height, 1));
-		_vulkanContext.GrContext?.ResetContext();
 		_vulkanContext.EnsureCachedSurface();
 
 		return _vulkanContext.CachedSkSurface
@@ -68,19 +67,20 @@ internal class X11VulkanRenderer : X11Renderer
 
 	protected override void MakeCurrent()
 	{
-		// Acquire device lock and prepare for rendering
+		// Acquire device lock and prepare for rendering. Graphite has no
+		// equivalent of GRContext.ResetContext — its recorder is the
+		// per-frame state.
 		_deviceLock = _vulkanContext.Device?.Lock();
-		_vulkanContext.GrContext?.ResetContext();
 		_vulkanContext.EnsureCachedSurface();
 	}
 
 	protected override void Flush()
 	{
-		if (_vulkanContext.CachedSkSurface != null && _vulkanContext.GrContext != null)
+		if (_vulkanContext.CachedSkSurface != null && _vulkanContext.GraphiteContext != null)
 		{
-			_vulkanContext.CachedSkSurface.Canvas.Flush();
-			_vulkanContext.GrContext.Flush();
-
+			// BlitAndPresent does the Snap+InsertRecording+Submit internally
+			// before issuing the swapchain blit, so we no longer need a
+			// separate canvas/context flush pair here.
 			if (!_needsFullResize)
 			{
 				_vulkanContext.BlitAndPresent();

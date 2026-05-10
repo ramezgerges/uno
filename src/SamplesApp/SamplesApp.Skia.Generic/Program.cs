@@ -33,6 +33,12 @@ namespace SkiaSharpExample
 		{
 			SamplesApp.App.ConfigureLogging(); // Enable tracing of the host
 
+			if (Environment.GetEnvironmentVariable("UNO_RENDERER_VULKAN") == "1")
+			{
+				FeatureConfiguration.Rendering.UseVulkanOnX11 = true;
+				FeatureConfiguration.Rendering.UseVulkanOnWin32 = true;
+			}
+
 			UnoPlatformHost? host = default;
 			var builder = UnoPlatformHostBuilder.Create()
 				.App(() => _app = new SamplesApp.App())
