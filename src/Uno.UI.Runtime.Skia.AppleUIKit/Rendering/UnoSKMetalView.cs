@@ -18,7 +18,8 @@ namespace Uno.UI.Runtime.Skia.AppleUIKit
 {
 	internal sealed partial class UnoSKMetalView : MTKView, IMTKViewDelegate
 	{
-		private readonly GRContext? _context;
+		private readonly SKGraphiteContext? _context;
+		private readonly SKGraphiteRecorder? _recorder;
 		private readonly IMTLCommandQueue? _queue;
 
 		private RootViewController? _owner;
@@ -50,11 +51,17 @@ namespace Uno.UI.Runtime.Skia.AppleUIKit
 				return;
 			}
 
-			_context = GRContext.CreateMetal(new GRMtlBackendContext()
+			// Graphite-backed context. Skia CFRetains the device/queue handles inside the
+			// native MtlBackendContext, so the SKGraphiteMtlBackendContext wrapper is
+			// safe to dispose right after CreateMetal returns.
+			using (var bc = new SKGraphiteMtlBackendContext { MtlDevice = device.Handle, MtlQueue = queue.Handle })
 			{
-				Device = device,
-				Queue = queue
-			});
+				_context = SKGraphiteContext.CreateMetal(bc);
+			}
+			// Without an ImageProvider, Graphite drops every draw whose source SkImage
+			// isn't already Graphite-backed. The Default provider uploads-on-demand
+			// with an LRU cache; sufficient as a baseline policy.
+			_recorder = _context?.CreateRecorder(-1, SKGraphiteImageProvider.Default);
 
 			_queue = queue;
 
@@ -155,34 +162,61 @@ namespace Uno.UI.Runtime.Skia.AppleUIKit
 
 			SKSurface? surface = null;
 			SKCanvas? canvas = null;
+			SKGraphiteBackendTexture? backendTexture = null;
 			ICAMetalDrawable? drawable = null;
 			IMTLCommandBuffer? commandBuffer = null;
 
 			try
 			{
-				// Defer the acquisition of the drawable
 #if __TVOS__ // TODO: tvOS is not supported yet.
 				surface = SKSurface.CreateNull(width, height);
+				canvas = surface.Canvas;
+				_owner?.OnRenderFrameRequested(canvas);
 #else
-				surface = SKSurface.Create(_context, this, GRSurfaceOrigin.TopLeft, (int)SampleCount, SKColorType.Bgra8888);
-#endif
+				if (_context is null || _recorder is null)
+				{
+					return;
+				}
 
+				// Acquire the drawable upfront on the Graphite path — we need its
+				// underlying MTLTexture to wrap as a BackendTexture before any
+				// drawing can be recorded. (The Ganesh helper that took an MTKView
+				// directly did this internally.)
+				drawable = CurrentDrawable;
+				if (drawable is null)
+				{
+					return;
+				}
+
+				backendTexture = SKGraphiteBackendTexture.CreateMetal(width, height, drawable.Texture.Handle);
+				if (backendTexture is null)
+				{
+					return;
+				}
+				surface = SKSurface.Create(_recorder, backendTexture, SKColorType.Bgra8888);
+				if (surface is null)
+				{
+					return;
+				}
 				canvas = surface.Canvas;
 
 				_owner?.OnRenderFrameRequested(canvas);
 
-				// Flush
-				_context!.Flush(submit: true);
-
-				// Present
-				drawable = CurrentDrawable;
-
-				if (drawable != null)
+				// Snap + insert + submit — Graphite equivalent of GRContext.Flush(submit: true).
+				using (var recording = _recorder.Snap())
 				{
-					commandBuffer = _queue!.CommandBuffer()!;
-					commandBuffer.PresentDrawable(drawable);
-					commandBuffer.Commit();
+					if (recording is not null)
+					{
+						_context.InsertRecording(recording);
+					}
 				}
+				_context.Submit();
+
+				// Present the drawable we already acquired.
+				commandBuffer = _queue!.CommandBuffer()!;
+				commandBuffer.PresentDrawable(drawable);
+				commandBuffer.Commit();
+#endif
 			}
 			finally
 			{
@@ -192,6 +226,7 @@ namespace Uno.UI.Runtime.Skia.AppleUIKit
 				((IDisposable?)drawable)?.Dispose();
 				((IDisposable?)canvas)?.Dispose();
 				((IDisposable?)surface)?.Dispose();
+				backendTexture?.Dispose();
 			}
 		}
 	}

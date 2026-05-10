@@ -29,7 +29,8 @@ internal class MacOSWindowHost : IXamlRootHost, IUnoKeyboardInputSource, IUnoCor
 	private readonly Window _winUIWindow;
 	private readonly XamlRoot _xamlRoot;
 	private readonly DisplayInformation _displayInformation;
-	private readonly GRContext? _context;
+	private readonly SKGraphiteContext? _context;
+	private readonly SKGraphiteRecorder? _recorder;
 	private SKBitmap? _bitmap;
 	private SKSurface? _surface;
 	private int _rowBytes;
@@ -53,12 +54,17 @@ internal class MacOSWindowHost : IXamlRootHost, IUnoKeyboardInputSource, IUnoCor
 		{
 			case RenderSurfaceType.Metal:
 				NativeUno.uno_window_get_metal_handles(_nativeWindow.Handle, out var device, out var queue);
-				var ctx = new GRMtlBackendContext()
+				// Graphite-backed Metal context. Skia CFRetains the device/queue handles
+				// inside the native MtlBackendContext, so the SKGraphiteMtlBackendContext
+				// wrapper is safe to dispose right after CreateMetal returns.
+				using (var bc = new SKGraphiteMtlBackendContext { MtlDevice = device, MtlQueue = queue })
 				{
-					DeviceHandle = device,
-					QueueHandle = queue,
-				};
-				_context = GRContext.CreateMetal(ctx);
+					_context = SKGraphiteContext.CreateMetal(bc);
+				}
+				// Without an ImageProvider, Graphite drops every draw whose source SkImage
+				// isn't already Graphite-backed. The Default provider uploads-on-demand
+				// with an LRU cache; sufficient as a baseline policy.
+				_recorder = _context?.CreateRecorder(-1, SKGraphiteImageProvider.Default);
 				break;
 			case RenderSurfaceType.Software:
 				break;
@@ -103,12 +109,12 @@ internal class MacOSWindowHost : IXamlRootHost, IUnoKeyboardInputSource, IUnoCor
 		}
 
 		// we can't cache anything since the texture will be different on next calls
-		GRBackendRenderTarget? target = null;
+		SKGraphiteBackendTexture? backendTexture = null;
 		SKSurface? surface = null;
 		var nativeElementClipPath = ((CompositionTarget)RootElement!.Visual.CompositionTarget!).OnNativePlatformFrameRequested(null, size =>
 		{
-			target = new GRBackendRenderTarget((int)size.Width, (int)size.Height, new GRMtlTextureInfo(texture));
-			surface = SKSurface.Create(_context, target, GRSurfaceOrigin.TopLeft, SKColorType.Rgba8888);
+			backendTexture = SKGraphiteBackendTexture.CreateMetal((int)size.Width, (int)size.Height, texture);
+			surface = SKSurface.Create(_recorder, backendTexture, SKColorType.Rgba8888);
 			return surface.Canvas;
 		});
 
@@ -123,8 +129,17 @@ internal class MacOSWindowHost : IXamlRootHost, IUnoKeyboardInputSource, IUnoCor
 			}
 		}
 
-		_context?.Flush();
-		target?.Dispose();
+		// Snap + insert + submit — Graphite equivalent of GRContext.Flush().
+		if (_recorder is not null && _context is not null)
+		{
+			using var recording = _recorder.Snap();
+			if (recording is not null)
+			{
+				_context.InsertRecording(recording);
+			}
+			_context.Submit();
+		}
+		backendTexture?.Dispose();
 		surface?.Dispose();
 	}
 
