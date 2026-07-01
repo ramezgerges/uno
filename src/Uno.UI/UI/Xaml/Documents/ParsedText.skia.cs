@@ -805,6 +805,110 @@ internal readonly struct ParsedText : IParsedText
 		}
 	}
 
+	// EXPERIMENTAL WebGPU path: mirror of Draw's LTR layout, but emit each glyph's OUTLINE
+	// (read from the font via Skia — no Skia drawing) as a filled path. Skips RTL/decorations/
+	// selection/caret for now. (Legacy renderer — TextBlock uses UnicodeText, which honours highlighters.)
+	public void DrawWebGpu(IWebGpuDrawList draw, global::System.Numerics.Matrix4x4 matrix, global::System.Numerics.Vector4 clip, float opacity, IEnumerable<TextHighlighter> highlighters, (int index, CompositionBrush brush, float thickness)? caret)
+	{
+		_ = highlighters;
+		_ = caret;
+		if (_renderLines.Count == 0)
+		{
+			return;
+		}
+
+		var alignment = _textAlignment;
+		float y = 0;
+		for (var lineIndex = 0; lineIndex < _renderLines.Count; lineIndex++)
+		{
+			var line = _renderLines[lineIndex];
+			(float x, float _) = line.GetOffsets((float)_availableSize.Width, alignment);
+			y += line.Height;
+			float baseline = line.BaselineOffsetY;
+
+			for (int s = 0; s < line.RenderOrderedSegmentSpans.Count; s++)
+			{
+				var segmentSpan = line.RenderOrderedSegmentSpans[s];
+				var segment = segmentSpan.Segment;
+				var inline = segment.Inline;
+				var fontInfo = segment.FallbackFont ?? inline.FontInfo;
+
+				var color = global::Windows.UI.Color.FromArgb(255, 0, 0, 0);
+				if (inline.Foreground is Microsoft.UI.Xaml.Media.SolidColorBrush scb) { color = scb.Color; }
+				else if (inline.Foreground is Microsoft.UI.Xaml.Media.GradientBrush gb) { color = gb.FallbackColorWithOpacity; }
+
+				if (segment.Direction != FlowDirection.LeftToRight)
+				{
+					// advance x past this segment so following segments are positioned, but skip drawing RTL for now
+					for (int i = 0; i < segmentSpan.GlyphsLength; i++) { x += segment.Glyphs[segmentSpan.GlyphsStart + i].AdvanceX; }
+					continue;
+				}
+
+				for (int i = 0; i < segmentSpan.GlyphsLength; i++)
+				{
+					var gi = segment.Glyphs[segmentSpan.GlyphsStart + i];
+					if (gi.AdvanceX > 0) { x += segmentSpan.CharacterSpacing; }
+					float originX = x + gi.OffsetX - segmentSpan.CharacterSpacing;
+					float originY = y + baseline + gi.OffsetY;
+					x += gi.AdvanceX;
+
+					using var path = fontInfo.SKFont.GetGlyphPath(gi.GlyphId);
+					if (path is null || path.IsEmpty) { continue; }
+					var contours = FlattenGlyph(path, originX, originY);
+					if (contours.Length > 0) { draw.AddPath(matrix, contours, color, opacity, clip); }
+				}
+			}
+		}
+	}
+
+	private static global::System.Numerics.Vector2[][] FlattenGlyph(SKPath path, float ox, float oy)
+	{
+		const int steps = 8;
+		var contours = new List<global::System.Numerics.Vector2[]>();
+		List<global::System.Numerics.Vector2>? cur = null;
+		var pts = new SKPoint[4];
+		using var it = path.CreateIterator(false);
+		SKPathVerb verb;
+		while ((verb = it.Next(pts)) != SKPathVerb.Done)
+		{
+			switch (verb)
+			{
+				case SKPathVerb.Move:
+					if (cur is { Count: >= 2 }) { contours.Add(cur.ToArray()); }
+					cur = new() { new global::System.Numerics.Vector2(pts[0].X + ox, pts[0].Y + oy) };
+					break;
+				case SKPathVerb.Line:
+					cur!.Add(new global::System.Numerics.Vector2(pts[1].X + ox, pts[1].Y + oy));
+					break;
+				case SKPathVerb.Quad:
+				case SKPathVerb.Conic:
+					for (int i = 1; i <= steps; i++)
+					{
+						float t = i / (float)steps, u = 1 - t;
+						cur!.Add(new global::System.Numerics.Vector2(
+							u * u * (pts[0].X + ox) + 2 * u * t * (pts[1].X + ox) + t * t * (pts[2].X + ox),
+							u * u * (pts[0].Y + oy) + 2 * u * t * (pts[1].Y + oy) + t * t * (pts[2].Y + oy)));
+					}
+					break;
+				case SKPathVerb.Cubic:
+					for (int i = 1; i <= steps; i++)
+					{
+						float t = i / (float)steps, u = 1 - t;
+						cur!.Add(new global::System.Numerics.Vector2(
+							u * u * u * (pts[0].X + ox) + 3 * u * u * t * (pts[1].X + ox) + 3 * u * t * t * (pts[2].X + ox) + t * t * t * (pts[3].X + ox),
+							u * u * u * (pts[0].Y + oy) + 3 * u * u * t * (pts[1].Y + oy) + 3 * u * t * t * (pts[2].Y + oy) + t * t * t * (pts[3].Y + oy)));
+					}
+					break;
+				case SKPathVerb.Close:
+					if (cur is { Count: >= 2 }) { contours.Add(cur.ToArray()); }
+					cur = null;
+					break;
+			}
+		}
+		if (cur is { Count: >= 2 }) { contours.Add(cur.ToArray()); }
+		return contours.ToArray();
+	}
+
 	private void RenderText(SelectionDetails? selection, int lineIndex, int characterCountSoFar,
 		RenderSegmentSpan segmentSpan, FontDetails fontInfo, Span<SKPoint> positions, Span<ushort> glyphs,
 		SKCanvas canvas, float y, SKPaint paint)

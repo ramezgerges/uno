@@ -51,6 +51,38 @@ public partial class ShapeVisual
 		base.Paint(in session);
 	}
 
+	// EXPERIMENTAL WebGPU path: fill each child shape's geometry.
+	internal override void PaintWebGpu(IWebGpuDrawList draw, SkiaSharp.SKRect clipInRoot, float opacity)
+	{
+		if (Size.X == 0 || Size.Y == 0)
+		{
+			return;
+		}
+		var clip = new System.Numerics.Vector4(clipInRoot.Left, clipInRoot.Top, clipInRoot.Right, clipInRoot.Bottom);
+
+		// ViewBox maps the shapes' coordinate space into the visual: scale by Size/ViewBox.Size then translate by
+		// -ViewBox.Offset — composed into the shapes' base matrix, equivalent to Skia's canvas.Scale + canvas.Translate.
+		// (TODO: ViewBox.Stretch/alignment ratios, also not handled by the Skia path.)
+		var baseMatrix = TotalMatrix;
+		if (ViewBox is { } viewBox)
+		{
+			float sx = viewBox.Size.X > 0 ? Size.X / viewBox.Size.X : 1;
+			float sy = viewBox.Size.Y > 0 ? Size.Y / viewBox.Size.Y : 1;
+			baseMatrix = Matrix4x4.CreateTranslation(-viewBox.Offset.X, -viewBox.Offset.Y, 0)
+				* Matrix4x4.CreateScale(sx, sy, 1)
+				* TotalMatrix;
+		}
+
+		if (_shapes is { Count: not 0 } shapes)
+		{
+			for (var i = 0; i < shapes.Count; i++)
+			{
+				shapes[i].PaintWebGpu(draw, baseMatrix, clip, opacity);
+			}
+		}
+		base.PaintWebGpu(draw, clipInRoot, opacity);
+	}
+
 	private protected override void OnPropertyChangedCore(string? propertyName, bool isSubPropertyChange)
 	{
 		base.OnPropertyChangedCore(propertyName, isSubPropertyChange);

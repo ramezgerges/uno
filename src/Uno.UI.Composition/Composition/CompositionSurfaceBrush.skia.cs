@@ -30,7 +30,7 @@ namespace Microsoft.UI.Composition
 			_ => null
 		};
 
-		private Rect GetArrangedImageRect(Size sourceSize, SKRect targetRect)
+		internal Rect GetArrangedImageRect(Size sourceSize, SKRect targetRect)
 		{
 			var size = GetArrangedImageSize(sourceSize, targetRect.Size.ToSize());
 

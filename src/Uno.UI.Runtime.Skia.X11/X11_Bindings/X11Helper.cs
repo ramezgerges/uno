@@ -353,6 +353,10 @@ internal static partial class X11Helper
 		IntPtr data, uint width, uint height, int bitmap_pad, int bytes_per_line);
 
 	[LibraryImport(libX11)]
+	public static partial IntPtr XGetImage(IntPtr display, IntPtr drawable, int x, int y,
+		uint width, uint height, ulong plane_mask, int format);
+
+	[LibraryImport(libX11)]
 	public static partial int XClearWindow(IntPtr display, IntPtr window);
 
 	[LibraryImport(libX11, StringMarshallingCustomType = typeof(AnsiStringMarshaller))]

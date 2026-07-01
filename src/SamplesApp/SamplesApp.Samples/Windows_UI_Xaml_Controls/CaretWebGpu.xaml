@@ -1,0 +1,8 @@
+<UserControl
+	x:Class="UITests.Shared.Windows_UI_Xaml_Controls.TextBoxTests.CaretWebGpu"
+	xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+	xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+	<StackPanel Margin="40" Background="White">
+		<TextBox x:Name="box" FontSize="28" Width="300" Text="Hello" />
+	</StackPanel>
+</UserControl>

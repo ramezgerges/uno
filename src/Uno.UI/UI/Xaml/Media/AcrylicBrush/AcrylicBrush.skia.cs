@@ -108,7 +108,11 @@ public partial class AcrylicBrush
 		_brush?.Dispose();
 		if (forceCreateAcrylicBrush)
 		{
-			_brush = AcrylicBrushExtensions.GetUseCompositionEffectBrush(this)
+			// The experimental WebGPU backend only consumes the direct SkiaAcrylicBrush (explicit
+			// blur/tint params); force it off the effect-graph path when that renderer is active.
+			var useEffectBrush = AcrylicBrushExtensions.GetUseCompositionEffectBrush(this)
+				&& Environment.GetEnvironmentVariable("UNO_WEBGPU") != "1";
+			_brush = useEffectBrush
 				? CreateAcrylicBrushViaCompositionEffect(compositor, useCrossFadeEffect)
 				: CreateAcrylicBrushDirect(compositor);
 		}

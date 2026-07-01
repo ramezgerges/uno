@@ -1,0 +1,10 @@
+<Page x:Class="UITests.Windows_UI_Xaml_Controls.BorderEdgeWebGpu"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Background="White">
+    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+        <!-- big text inside an Opacity<1 group → forces the segmented (layer) path -->
+        <Grid Opacity="0.99" Background="White">
+            <TextBlock Text="Segmented AA" FontSize="64" Foreground="Black" />
+        </Grid>
+    </StackPanel>
+</Page>

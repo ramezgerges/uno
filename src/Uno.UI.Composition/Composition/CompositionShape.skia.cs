@@ -77,6 +77,12 @@ public partial class CompositionShape
 	{
 	}
 
+	// EXPERIMENTAL WebGPU path. baseMatrix is the owning ShapeVisual's matrix; this shape's Offset
+	// is applied on top (mirroring Render's canvas.Translate(Offset)).
+	internal virtual void PaintWebGpu(IWebGpuDrawList draw, System.Numerics.Matrix4x4 baseMatrix, System.Numerics.Vector4 clip, float opacity)
+	{
+	}
+
 	internal virtual bool CanPaint() => false;
 
 	internal virtual bool HitTest(Point point) => false;

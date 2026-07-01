@@ -35,6 +35,14 @@ namespace Microsoft.UI.Composition
 			}
 		}
 
+		internal override void PaintWebGpu(IWebGpuDrawList draw, SKRect clipInRoot, float opacity)
+		{
+			if (_owner.TryGetTarget(out var owner))
+			{
+				owner.DrawWebGpu(draw, TotalMatrix, new global::System.Numerics.Vector4(clipInRoot.Left, clipInRoot.Top, clipInRoot.Right, clipInRoot.Bottom), opacity);
+			}
+		}
+
 		internal override bool CanPaint() => true;
 
 		internal override bool PaintsWithinOwnSize => true;

@@ -80,6 +80,135 @@ namespace Microsoft.UI.Composition
 
 		internal override bool CanPaint() => (FillBrush?.CanPaint() ?? false) || (StrokeBrush?.CanPaint() ?? false);
 
+		// EXPERIMENTAL WebGPU path: fill the geometry via stencil-then-cover (solid color only for now).
+		// WebGPU counterpart of Paint: it MUST mirror the Skia stroke/fill geometry generation exactly (dashes, trim,
+		// caps, miter-clip joins, background-colour transition) — the only difference is that the resulting SKPath is
+		// flattened and handed to the GPU draw list instead of being clipped+painted onto an SKCanvas.
+		internal override void PaintWebGpu(IWebGpuDrawList draw, System.Numerics.Matrix4x4 baseMatrix, System.Numerics.Vector4 clip, float opacity)
+		{
+			if (_geometryWithTransformations is not { } geometryWithTransformations)
+			{
+				return;
+			}
+
+			var m = (System.Numerics.Matrix4x4.Identity with { M41 = Offset.X, M42 = Offset.Y }) * baseMatrix;
+
+			if (FillBrush is { } fill && _fillGeometryWithTransformations is { } finalFillGeometryWithTransformations)
+			{
+				var fillPaint = _sparePaint;
+				PrepareTempPaint(fillPaint, isStroke: false);
+
+				if (Geometry is not null && (Geometry.TrimStart != default || Geometry.TrimEnd != default))
+				{
+					fillPaint.PathEffect = SKPathEffect.CreateTrim(Geometry.TrimStart, Geometry.TrimEnd);
+				}
+
+				var fillPath = _sparePath;
+				fillPath.Rewind();
+				finalFillGeometryWithTransformations.GetFillPath(fillPaint, fillPath);
+
+				var contours = WebGpuBrushPainter.FlattenPath(fillPath);
+				if (contours.Length > 0)
+				{
+					// A theme/brush transition supplies a transient fill colour that overrides the brush (matches Skia).
+					if (Compositor.TryGetEffectiveBackgroundColor(this, out var colorFromTransition))
+					{
+						draw.AddPath(m, contours, colorFromTransition, opacity, clip);
+					}
+					else
+					{
+						WebGpuBrushPainter.FillPath(draw, fill, m, contours, opacity, clip);
+					}
+				}
+			}
+
+			if (StrokeBrush is { } stroke && StrokeThickness > 0)
+			{
+				var strokePaint = _sparePaint;
+				PrepareTempPaint(strokePaint, isStroke: true);
+
+				strokePaint.StrokeWidth = StrokeThickness;
+				strokePaint.StrokeJoin = ToSKStrokeJoin(StrokeLineJoin);
+				strokePaint.StrokeMiter = StrokeMiterLimit;
+
+				bool needsCustomCaps = StrokeStartCap != StrokeEndCap
+					|| StrokeStartCap == CompositionStrokeCap.Triangle;
+
+				float[]? dashValues = null;
+				if (StrokeDashArray is { Count: > 0 } strokeDashArray)
+				{
+					strokePaint.StrokeCap = ToSKStrokeCap(StrokeDashCap);
+					dashValues = strokeDashArray.ToEvenArray();
+					for (int i = 0; i < dashValues.Length; i++)
+					{
+						dashValues[i] *= StrokeThickness;
+					}
+					var dashEffect = SKPathEffect.CreateDash(dashValues, StrokeDashOffset * StrokeThickness);
+					if (dashEffect is not null)
+					{
+						strokePaint.PathEffect = dashEffect;
+					}
+					else
+					{
+						dashValues = null;
+					}
+				}
+				else if (!needsCustomCaps)
+				{
+					strokePaint.StrokeCap = ToSKStrokeCap(StrokeEndCap);
+				}
+
+				if (Geometry is not null && (Geometry.TrimStart != default || Geometry.TrimEnd != default))
+				{
+					var pathEffect = SKPathEffect.CreateTrim(Geometry.TrimStart, Geometry.TrimEnd);
+					if (strokePaint.PathEffect is SKPathEffect effect)
+					{
+						pathEffect = SKPathEffect.CreateSum(effect, pathEffect);
+					}
+
+					strokePaint.PathEffect = pathEffect;
+				}
+
+				var strokeFillPath = _sparePath;
+				strokeFillPath.Rewind();
+				geometryWithTransformations.GetFillPath(strokePaint, strokeFillPath);
+
+				if (needsCustomCaps && StrokeDashArray is not { Count: > 0 })
+				{
+					AddCustomCaps(strokeFillPath, geometryWithTransformations.Geometry, StrokeThickness, StrokeStartCap, StrokeEndCap);
+				}
+
+				if (dashValues is not null
+					&& (StrokeDashCap != CompositionStrokeCap.Flat
+						|| StrokeStartCap != CompositionStrokeCap.Flat
+						|| StrokeEndCap != CompositionStrokeCap.Flat))
+				{
+					FixDashEndpointCaps(strokeFillPath, geometryWithTransformations.Geometry,
+						StrokeThickness, StrokeDashCap, StrokeStartCap, StrokeEndCap,
+						dashValues, StrokeDashOffset * StrokeThickness);
+				}
+
+				if (dashValues is not null && StrokeDashCap == CompositionStrokeCap.Triangle)
+				{
+					AddInternalTriangleDashCaps(strokeFillPath, geometryWithTransformations.Geometry,
+						StrokeThickness, dashValues, StrokeDashOffset * StrokeThickness);
+				}
+
+				if (StrokeLineJoin == CompositionStrokeLineJoin.Miter)
+				{
+					AddClippedMiterJoints(strokeFillPath, geometryWithTransformations.Geometry,
+						StrokeThickness, StrokeMiterLimit);
+				}
+
+				var strokeContours = WebGpuBrushPainter.FlattenPath(strokeFillPath);
+				if (strokeContours.Length > 0)
+				{
+					WebGpuBrushPainter.FillPath(draw, stroke, m, strokeContours, opacity, clip);
+				}
+			}
+		}
+
+
 		private static readonly SKPaint _sparePaint = new SKPaint();
 		private static readonly SKPath _sparePath = new SKPath();
 

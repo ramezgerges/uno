@@ -218,7 +218,13 @@ internal static class SkiaRenderHelper
 		// pays only a single property read per call site. Null-safe against headless/
 		// test/early-init scenarios where Application.Current or DebugSettings may not
 		// yet be available.
-		private static bool IsEnabled => Application.Current?.DebugSettings?.EnableFrameRateCounter ?? false;
+		// UNO_FPS_COUNTER=1 force-enables the counter without going through DebugSettings — convenient for
+		// headless/perf runs and for the WebGPU backend, which has no UI toggle wired.
+		private static readonly bool _forcedByEnv = Environment.GetEnvironmentVariable("UNO_FPS_COUNTER") == "1";
+		private static bool IsEnabled => _forcedByEnv || (Application.Current?.DebugSettings?.EnableFrameRateCounter ?? false);
+
+		/// <summary>Whether the counter is currently enabled — lets callers skip overlay setup work when off.</summary>
+		public bool Enabled => IsEnabled;
 
 		public FrameDisposable BeginFrame()
 		{

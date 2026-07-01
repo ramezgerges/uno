@@ -1,0 +1,5 @@
+<Page x:Class="UITests.Windows_UI_Xaml_Controls.PerfText"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Background="White">
+    <ScrollViewer><StackPanel x:Name="root" /></ScrollViewer>
+</Page>

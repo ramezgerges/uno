@@ -238,6 +238,7 @@ public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 			_picture = IntPtr.Zero;
 		}
 		_flags |= VisualFlags.PaintDirty;
+		InvalidateWebGpuPaintCache();
 		InvalidateParentChildrenPicture(false);
 	}
 

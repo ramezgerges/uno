@@ -175,6 +175,30 @@ public partial class CompositionTarget
 		return Draw(canvas, resizeFunc);
 	}
 
+	/// <summary>
+	/// EXPERIMENTAL WebGPU counterpart of <see cref="OnNativePlatformFrameRequested"/>. Called from
+	/// the render thread: drives the same frame state machine and ticks the rendering timeline
+	/// (animations via <see cref="InvokeRendering"/>), then hands back the latest WebGpuDrawList
+	/// built on the UI thread for the caller to GPU-render and present. Returns null when no new
+	/// frame is ready (the caller keeps the previous frame on screen).
+	/// </summary>
+	internal Microsoft.UI.Composition.IWebGpuDrawList? OnNativePlatformFrameRequestedWebGpu()
+	{
+		if (Interlocked.Exchange(ref _shouldEnqueueRenderOnNextNativePlatformFrameRequested, false))
+		{
+			NativeDispatcher.Main.EnqueueRender(this, EnqueueRenderCallback);
+		}
+
+		InvokeRendering();
+
+		lock (_frameGate)
+		{
+			var dl = _lastWebGpuDrawList;
+			_lastWebGpuDrawList = null;
+			return dl;
+		}
+	}
+
 	internal void OnRenderFrameOpportunity()
 	{
 		// If we get an opportunity to get call Render earlier than EnqueuePaintCallback, then we do that

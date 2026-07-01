@@ -18,6 +18,10 @@ namespace Microsoft.UI.Composition
 			canvas.DrawRect(bounds, _tempPaint);
 		}
 
-		internal override bool CanPaint() => Color != Colors.Transparent;
+		// A zero-alpha brush paints nothing regardless of its RGB. Testing alpha (rather than equality with the
+		// single Colors.Transparent constant, #00FFFFFF) also treats #00000000 — the common hit-test fill on a
+		// Grid/Border — as non-painting, which matters because a transparent fill counted as a painting layer
+		// forces a needless offscreen opacity layer around e.g. every FontIcon.
+		internal override bool CanPaint() => Color.A != 0;
 	}
 }

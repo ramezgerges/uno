@@ -104,7 +104,11 @@ internal partial class Win32WindowWrapper : NativeWindowWrapperBase, IXamlRootHo
 
 		Win32Host.RegisterWindow(_hwnd);
 
-		_renderer = FeatureConfiguration.Rendering.UseVulkanOnWin32
+		// EXPERIMENTAL WebGPU backend renders offscreen + presents via its own swapchain, so keep a lightweight
+		// software renderer as the (unused) IRenderer placeholder — avoid creating a GL/Vulkan context on the HWND.
+		_renderer = _useWebGpu
+			? new SoftwareRenderer(_hwnd)
+			: FeatureConfiguration.Rendering.UseVulkanOnWin32
 			? (IRenderer?)VulkanRenderer.TryCreateVulkanRenderer(_hwnd)
 				?? (FeatureConfiguration.Rendering.UseOpenGLOnWin32 ?? true
 					? (IRenderer?)GlRenderer.TryCreateGlRenderer(_hwnd) ?? new SoftwareRenderer(_hwnd)
@@ -527,6 +531,7 @@ internal partial class Win32WindowWrapper : NativeWindowWrapperBase, IXamlRootHo
 		_surface?.Dispose();
 		_surface = null;
 		_renderer.Dispose();
+		if (_useWebGpu) { DisposeWebGpu(); }
 		_rendererDisposed = true;
 		_backgroundDisposable?.Dispose();
 		DestroyIcons();

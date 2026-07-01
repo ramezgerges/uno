@@ -1,0 +1,25 @@
+<Page
+    x:Class="UITests.Windows_UI_Xaml_Media.ThemeShadowTests.ShadowWebGpu"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="White">
+    <Grid>
+        <Border x:Name="OpaqueCard"
+                Width="180"
+                Height="150"
+                Margin="0,0,300,0"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Background="Red"
+                CornerRadius="16" />
+        <Border x:Name="TransCard"
+                Width="180"
+                Height="150"
+                Margin="300,0,0,0"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Background="Red"
+                CornerRadius="16"
+                Opacity="0.35" />
+    </Grid>
+</Page>

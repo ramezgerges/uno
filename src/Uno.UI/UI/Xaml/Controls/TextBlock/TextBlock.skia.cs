@@ -5,7 +5,7 @@ using System.Collections.Specialized;
 using System.Linq;
 using Windows.Foundation;
 using Microsoft.UI.Composition;
-using System.Numerics;
+using global::System.Numerics;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
 using Microsoft.UI.Xaml.Documents;
@@ -306,6 +306,29 @@ namespace Microsoft.UI.Xaml.Controls
 				compositionRange);
 			session.Canvas.Restore();
 			DrawingFinished?.Invoke();
+		}
+
+		// EXPERIMENTAL WebGPU path: emit glyph outlines into the draw list (padding-translated). Highlighters
+		// (selection + TextHighlighters) are passed so the WebGPU path paints highlight backgrounds and applies the
+		// per-range foreground override, exactly like Draw — without them, selected/highlighted text was wrong.
+		internal void DrawWebGpu(Microsoft.UI.Composition.IWebGpuDrawList draw, global::System.Numerics.Matrix4x4 totalMatrix, global::System.Numerics.Vector4 clip, float opacity)
+		{
+			var m = global::System.Numerics.Matrix4x4.CreateTranslation((float)Padding.Left, (float)Padding.Top, 0) * totalMatrix;
+			var highlighters = _renderSelection ? TextHighlighters.Append(new TextHighlighter
+			{
+				Background = SelectionHighlightColor,
+				Foreground = DefaultBrushes.SelectedTextForegroundColor,
+				Ranges =
+				{
+					new TextRange
+					{
+						StartIndex = Math.Min(Selection.start, Selection.end),
+						Length = Math.Abs(Selection.start - Selection.end)
+					}
+				}
+			}) : TextHighlighters;
+			ParsedText.DrawWebGpu(draw, m, clip, opacity, highlighters,
+				_caretPaint is { } c ? (c.index, c.brush, CaretThickness) : null);
 		}
 
 		/// <summary>

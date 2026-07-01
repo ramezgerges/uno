@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using Windows.Foundation;
 using Microsoft.UI.Xaml.Media;
 using SkiaSharp;
@@ -14,7 +15,7 @@ internal abstract class X11Renderer : IDisposable
 	private SKColor _background = SKColors.White;
 	private SKSurface? _surface;
 	private X11AirspaceRenderHelper? _airspaceHelper;
-	private readonly IXamlRootHost _host;
+	protected readonly IXamlRootHost _host;
 	protected readonly X11Window _x11Window;
 
 	protected X11Renderer(IXamlRootHost host, X11Window x11Window)
@@ -25,7 +26,7 @@ internal abstract class X11Renderer : IDisposable
 
 	public void SetBackgroundColor(SKColor color) => _background = color;
 
-	public void Render()
+	public virtual void Render()
 	{
 		if (this.Log().IsEnabled(LogLevel.Trace))
 		{
@@ -45,6 +46,9 @@ internal abstract class X11Renderer : IDisposable
 			MakeCurrent();
 		}
 
+		bool perf = Environment.GetEnvironmentVariable("UNO_RENDER_PERF") == "1";
+		long t0 = perf ? Stopwatch.GetTimestamp() : 0;
+
 		_surface?.Canvas.Clear(_background);
 		var nativeElementClipPath = ((CompositionTarget)_host.RootElement!.Visual.CompositionTarget!).OnNativePlatformFrameRequested(_surface?.Canvas, size =>
 		{
@@ -59,12 +63,22 @@ internal abstract class X11Renderer : IDisposable
 			return _surface.Canvas;
 		});
 
+		long t1 = perf ? Stopwatch.GetTimestamp() : 0;
+
 		_airspaceHelper?.XShapeClip(nativeElementClipPath);
 
 		using (X11Helper.XLock(display))
 		{
 			Flush();
 			_ = XLib.XFlush(display);
+		}
+
+		if (perf)
+		{
+			long t2 = Stopwatch.GetTimestamp();
+			double Ms(long a, long b) => (b - a) * 1000.0 / Stopwatch.Frequency;
+			var sz = _surface is { } s ? $"{s.Canvas.DeviceClipBounds.Width}x{s.Canvas.DeviceClipBounds.Height}" : "?";
+			this.Log().Info($"[PERF] skia {sz} draw={Ms(t0, t1):F2} flush+present={Ms(t1, t2):F2} total={Ms(t0, t2):F2} ms");
 		}
 	}
 

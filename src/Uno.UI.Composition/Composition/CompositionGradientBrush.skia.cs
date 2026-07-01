@@ -88,6 +88,43 @@ namespace Microsoft.UI.Composition
 			return transform;
 		}
 
+		// Applies the brush's transform (Scale/Rotation/Offset + TransformMatrix + RelativeTransform) to a linear
+		// gradient's endpoints — the WebGPU path needs the transformed device-space axis, the same way Skia sets
+		// this matrix as the shader's local matrix. <paramref name="bounds"/> is the fill region size (used to
+		// scale the relative transform's translation, matching CreateTransformMatrix).
+		internal void TransformGradientPoints(System.Numerics.Vector2 bounds, ref System.Numerics.Vector2 start, ref System.Numerics.Vector2 end)
+		{
+			var m = CreateTransformMatrix(new SKRect(0, 0, bounds.X, bounds.Y));
+			if (m.IsIdentity)
+			{
+				return;
+			}
+			var s = m.MapPoint(start.X, start.Y);
+			var e = m.MapPoint(end.X, end.Y);
+			start = new System.Numerics.Vector2(s.X, s.Y);
+			end = new System.Numerics.Vector2(e.X, e.Y);
+		}
+
+		// Radial counterpart of TransformGradientPoints: applies the same CreateTransformMatrix pipeline that Skia
+		// sets as the shader's local matrix. Center/origin are mapped as points and the radii are scaled by the
+		// matrix's per-axis magnitude — exact for translate/scale/flip (the common cases), approximate for a rotated
+		// or sheared ellipse (the WebGPU radial shader evaluates an axis-aligned ellipse).
+		internal void TransformRadialGradient(System.Numerics.Vector2 bounds, ref System.Numerics.Vector2 center, ref System.Numerics.Vector2 radius, ref System.Numerics.Vector2 origin)
+		{
+			var m = CreateTransformMatrix(new SKRect(0, 0, bounds.X, bounds.Y));
+			if (m.IsIdentity)
+			{
+				return;
+			}
+			var c = m.MapPoint(center.X, center.Y);
+			var o = m.MapPoint(origin.X, origin.Y);
+			center = new System.Numerics.Vector2(c.X, c.Y);
+			origin = new System.Numerics.Vector2(o.X, o.Y);
+			float sx = System.MathF.Sqrt(m.ScaleX * m.ScaleX + m.SkewY * m.SkewY);
+			float sy = System.MathF.Sqrt(m.SkewX * m.SkewX + m.ScaleY * m.ScaleY);
+			radius = new System.Numerics.Vector2(radius.X * sx, radius.Y * sy);
+		}
+
 		private void UpdateColorStops(CompositionColorGradientStopCollection colorStops)
 		{
 			var stopCount = colorStops.Count;

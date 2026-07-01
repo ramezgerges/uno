@@ -17,6 +17,13 @@ namespace Microsoft.UI.Composition
 			}
 		}
 
+		// WebGPU mirror: Skia paints children (base.Paint) first, then the redirected Source on top. The Source is
+		// therefore emitted AFTER children, via PaintOverChildrenWebGpu, to preserve that z-order.
+		internal override void PaintOverChildrenWebGpu(IWebGpuDrawList draw, SKRect clipInRoot, float opacity)
+		{
+			Source?.RenderWebGpu(draw, clipInRoot, opacity);
+		}
+
 		internal override bool CanPaint() => Source?.CanPaint() ?? false;
 		internal override bool RequiresRepaintOnEveryFrame => true;
 	}

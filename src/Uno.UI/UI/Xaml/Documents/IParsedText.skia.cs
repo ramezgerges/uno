@@ -13,6 +13,10 @@ internal interface IParsedText
 		(int startIndex, int length)? compositionRange
 	);
 
+	// EXPERIMENTAL WebGPU path: emit glyph outlines (filled via stencil-then-cover) into the draw list, plus the
+	// highlighter backgrounds + per-range foreground override (mirrors Draw's highlighter handling).
+	void DrawWebGpu(IWebGpuDrawList draw, global::System.Numerics.Matrix4x4 matrix, global::System.Numerics.Vector4 clip, float opacity, IEnumerable<TextHighlighter> highlighters, (int index, CompositionBrush brush, float thickness)? caret);
+
 	Rect GetRectForIndex(int adjustedIndex);
 
 	int GetIndexAt(Point p, bool ignoreEndingNewLine, bool extendedSelection);

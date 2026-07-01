@@ -32,6 +32,17 @@
 		<PackageReference Include="Uno.icu-win" />
 	</ItemGroup>
 
+	<!-- EXPERIMENTAL WebGPU rendering backend. The platform-agnostic core lives in the X11 runtime; link
+	     it here so the Win32 backend can render with the same WebGPU pipeline (opt-in via UNO_WEBGPU=1).
+	     Silk.NET.WebGPU.Native.WGPU ships wgpu_native.dll per-RID, so no manual native lib copy is needed. -->
+	<ItemGroup>
+		<PackageReference Include="Silk.NET.WebGPU" Version="2.23.0" />
+		<PackageReference Include="Silk.NET.WebGPU.Native.WGPU" Version="2.23.0" />
+		<PackageReference Include="Silk.NET.WebGPU.Extensions.WGPU" Version="2.23.0" />
+		<PackageReference Include="Silk.NET.Maths" Version="2.23.0" />
+		<Compile Include="..\Uno.UI.Runtime.Skia.X11\Rendering\WebGpu\*.cs" Link="Rendering\WebGpu\%(Filename)%(Extension)" />
+	</ItemGroup>
+
 	<ItemGroup>
 		<ProjectReference Include="..\Uno.Foundation\Uno.Foundation.Skia.csproj" />
 		<ProjectReference Include="..\Uno.UI.Runtime.Skia.Win32.Support\Uno.UI.Runtime.Skia.Win32.Support.csproj" PrivateAssets="all" />

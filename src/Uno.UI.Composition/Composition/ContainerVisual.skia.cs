@@ -117,6 +117,10 @@ public partial class ContainerVisual : Visual
 			return false;
 		}
 
+		// Reset here (only when there actually is a layout clip) rather than the caller unconditionally rewinding
+		// the scratch path for every container every frame — that per-visual native SKPath.Rewind() was a top
+		// managed cost in the build (per profiler). AddRect below appends, so the path must be empty first.
+		dst.Rewind();
 		var clipRect = rect.ToSKRect();
 		dst.AddRect(clipRect);
 		if (isAncestorClip)
@@ -157,8 +161,8 @@ public partial class ContainerVisual : Visual
 	internal override bool GetPrePaintingClipping(SKPath dst) // TODO: Do not use SKPath here, bad for perf and prevents usage for IDirectManipulationHandler.IsInBoundsForResume
 	{
 		var prePaintingClipPath = _sparePrePaintingClippingPath;
-
-		prePaintingClipPath.Rewind();
+		// NOTE: prePaintingClipPath is rewound inside GetArrangeClipPathInElementCoordinateSpace (only when there's
+		// a layout clip), so we don't rewind it unconditionally here — see that method.
 
 		if (base.GetPrePaintingClipping(dst))
 		{

@@ -93,6 +93,15 @@ internal readonly partial struct UnicodeText : IParsedText
 	private static readonly LRUCache<int, SKTypeface?> _skFontManagerDefaultMatchCharacterCache = new(1000); // most languages need much less than 1000 unique Unicode codepoints
 	private static readonly Brush _blackBrush = new SolidColorBrush(Colors.Black);
 	private static readonly SKPaint _spareDrawPaint = new() { IsStroke = false, IsAntialias = true };
+
+	// Flattened glyph outlines (glyph-local, no position baked in), keyed by (font, glyphId). Glyph outlines are
+	// immutable per font+size, so this avoids re-reading them from the font and re-flattening their béziers on the
+	// WebGPU path every frame — the dominant per-frame CPU cost when text fills the screen. SKFont instances are
+	// cached per font+size, so reference equality in the key gives stable hits.
+	private static readonly global::System.Collections.Concurrent.ConcurrentDictionary<(SKFont font, ushort glyph), global::System.Numerics.Vector2[][]?> _glyphContourCache = new();
+
+	// UNO_WEBGPU_NOTEXT=1: skip emitting glyph geometry on the WebGPU path (A/B test of the glyph cost).
+	private static readonly bool _skipGlyphs = global::System.Environment.GetEnvironmentVariable("UNO_WEBGPU_NOTEXT") == "1";
 	private static readonly SKPaint _spareSpellCheckPaint = new() { Color = SKColors.Red, Style = SKPaintStyle.Stroke, IsAntialias = true };
 	private static readonly SKPaint _spareCompositionUnderlinePaint = new() { Style = SKPaintStyle.Stroke, StrokeWidth = 1, IsAntialias = true };
 	private static readonly Dictionary<int, HashSet<IFontCacheUpdateListener>> _codepointToListeners = new();
@@ -810,6 +819,180 @@ internal readonly partial struct UnicodeText : IParsedText
 		}
 
 		return shapingRuns;
+	}
+
+	// EXPERIMENTAL WebGPU path: mirror of Draw's cluster→glyph positioning, emitting each glyph's OUTLINE (read
+	// from the font — no Skia drawing) as a filled path, PLUS the highlighter background rects and per-range
+	// foreground override that Draw applies. (Still no caret/spellcheck/composition — those are editor overlays.)
+	public void DrawWebGpu(Microsoft.UI.Composition.IWebGpuDrawList draw, global::System.Numerics.Matrix4x4 matrix, global::System.Numerics.Vector4 clip, float opacity, IEnumerable<TextHighlighter> highlighters, (int index, CompositionBrush brush, float thickness)? caret)
+	{
+		var highlighterSlicer = new RangeSlicer<(CompositionBrush? background, Brush foreground)>(0, _text.Length);
+		foreach (var highlighter in highlighters)
+		{
+			foreach (var range in highlighter.Ranges)
+			{
+				if (range.Length != 0 && range.StartIndex < _text.Length && _text.Length > 0)
+				{
+					highlighterSlicer.Mark(
+						Math.Min(range.StartIndex, _text.Length),
+						Math.Min(range.StartIndex + range.Length, _text.Length),
+						(highlighter.Background?.GetOrCreateCompositionBrush(Compositor.GetSharedCompositor()),
+							highlighter.Foreground ?? _blackBrush));
+				}
+			}
+		}
+		var highlighterSlices = highlighterSlicer.GetSegments();
+		var highlighterIndex = 0;
+
+		var runBreakIndex = 0;
+		SKRect? caretRect = null;
+		for (var clusterIndex = 0; clusterIndex < _clustersInLogicalOrder.Count; clusterIndex++)
+		{
+			var cluster = _clustersInLogicalOrder[clusterIndex];
+			while (highlighterSlices[highlighterIndex].End <= cluster.Value.start) { highlighterIndex++; }
+			while (_runBreaks[runBreakIndex].end <= cluster.Value.start) { runBreakIndex++; }
+
+			var lineIndex = cluster.Value.lineIndex;
+			var line = _lines[lineIndex];
+			var y = _xyTable[lineIndex].prefixSummedHeight - line.lineHeight;
+			var unalignedX = cluster.Value.indexInLine == 0 ? 0 : _xyTable[lineIndex].prefixSummedWidths[cluster.Value.indexInLine - 1].sumUntilAfterCluster;
+			var alignmentOffset = GetAlignmentOffsetForLine(line);
+			var positionAcc = new SKPoint(unalignedX + alignmentOffset, y + line.baselineOffset);
+			var fontDetails = cluster.Value.fontDetails;
+			var highlighter = highlighterSlices[highlighterIndex];
+
+			// Highlight background (selection / TextHighlighter), painted behind the glyphs for EVERY cluster —
+			// including whitespace, so a selection spans the spaces between words (mirrors Draw, where the background
+			// is outside the whitespace skip). Floor + 1px overlap matches Draw to avoid antialiased seams.
+			if (highlighter.Value.background is { } highlightBackground)
+			{
+				Microsoft.UI.Composition.WebGpuBrushPainter.FillRect(draw, highlightBackground, matrix,
+					new global::System.Numerics.Vector2(MathF.Floor(unalignedX + alignmentOffset), MathF.Floor(y)),
+					new global::System.Numerics.Vector2(
+						MathF.Floor(unalignedX + alignmentOffset + cluster.Value.width) + 1 - MathF.Floor(unalignedX + alignmentOffset),
+						MathF.Floor(y + line.lineHeight) + 1 - MathF.Floor(y)),
+					default, opacity, clip);
+			}
+
+			// Caret rect — computed for every cluster (the cursor can sit on a whitespace cluster).
+			if (caret is var (caretIndex, _, caretThickness))
+			{
+				if (caretIndex >= cluster.Value.start && caretIndex < cluster.Value.end)
+				{
+					caretRect = cluster.Value.rtl
+						? new SKRect(cluster.Value.width + alignmentOffset + unalignedX - caretThickness, y, cluster.Value.width + alignmentOffset + unalignedX, y + line.lineHeight)
+						: new SKRect(alignmentOffset + unalignedX, y, alignmentOffset + unalignedX + caretThickness, y + line.lineHeight);
+				}
+				else if (_endingNewLineLineHeight is null && caretIndex >= cluster.Value.start && clusterIndex == _clustersInLogicalOrder.Count - 1)
+				{
+					caretRect = cluster.Value.rtl
+						? new SKRect(alignmentOffset + unalignedX - caretThickness, y, alignmentOffset + unalignedX, y + line.lineHeight)
+						: new SKRect(cluster.Value.width + alignmentOffset + unalignedX, y, cluster.Value.width + alignmentOffset + unalignedX + caretThickness, y + line.lineHeight);
+				}
+			}
+
+			// Glyphs — only for non-whitespace/tab clusters.
+			if (!(cluster.Value.containsTab || (cluster.Value.containsOnlyWhitespace && !FeatureConfiguration.TextBlock.RenderWhiteSpace)))
+			{
+				// Foreground: the highlighter's foreground overrides the run's (e.g. selected text turns white).
+				var foreground = highlighter.Value.foreground is { } hf ? hf : _runBreaks[runBreakIndex].foreground;
+				var sk = BrushToColor(foreground, opacity);
+				var color = global::Windows.UI.Color.FromArgb(sk.Alpha, sk.Red, sk.Green, sk.Blue);
+
+				for (var glyphNode = cluster.Value.glyphStart; ; glyphNode = glyphNode.Next!)
+				{
+					var glyph = glyphNode.Value;
+					float gx = positionAcc.X + AdvanceToPixels(glyph.GlyphPosition.XOffset, fontDetails);
+					float gy = positionAcc.Y + AdvanceToPixels(glyph.GlyphPosition.YOffset, fontDetails);
+					// Glyph OUTLINES never change — reading them from the font (a native call) and flattening the
+						// béziers every frame was the dominant per-frame CPU cost. Cache the flattened, glyph-LOCAL contours
+						// per (font, glyph) and position each instance via the matrix instead of re-baking gx/gy.
+						// UNO_WEBGPU_NOTEXT=1 skips all glyph emission (and the flatten/upload/rasterize it drives on both
+						// threads) — an A/B to confirm whether glyphs are the bottleneck before building the atlas.
+						if (!_skipGlyphs)
+						{
+							var glyphKey = (fontDetails.SKFont, (ushort)glyph.Codepoint);
+							if (!_glyphContourCache.TryGetValue(glyphKey, out var glyphContours))
+							{
+								using var glyphPath = fontDetails.SKFont.GetGlyphPath((ushort)glyph.Codepoint);
+								glyphContours = glyphPath is not null && !glyphPath.IsEmpty ? FlattenGlyphForWebGpu(glyphPath, 0, 0) : null;
+								_glyphContourCache[glyphKey] = glyphContours;
+							}
+							if (glyphContours is { Length: > 0 })
+							{
+								draw.AddPath(matrix, glyphContours, color, 1f, clip, new global::System.Numerics.Vector2(gx, gy));
+							}
+						}
+					positionAcc.X += AdvanceToPixels(glyph.GlyphPosition.XAdvance, fontDetails);
+					if (cluster.Value.glyphLast == glyphNode) { break; }
+				}
+			}
+		}
+
+		// Caret at end-of-text / empty text (no cluster contains the index) — mirrors Draw.
+		if (caretRect is null && caret?.index == _text.Length)
+		{
+			var alignmentOffset = GetAlignmentOffsetForLine(null);
+			var top = _text.Length == 0 ? 0 : _xyTable[^1].prefixSummedHeight;
+			caretRect = _rtl
+				? new SKRect(alignmentOffset - caret.Value.thickness, top, alignmentOffset, top + _defaultFontDetails.LineHeight)
+				: new SKRect(alignmentOffset, top, alignmentOffset + caret.Value.thickness, top + _defaultFontDetails.LineHeight);
+		}
+
+		if (caretRect is { } cr && caret is { } caretValue)
+		{
+			Microsoft.UI.Composition.WebGpuBrushPainter.FillRect(draw, caretValue.brush, matrix,
+				new global::System.Numerics.Vector2(cr.Left, cr.Top), new global::System.Numerics.Vector2(cr.Width, cr.Height),
+				default, opacity, clip);
+		}
+	}
+
+	private static global::System.Numerics.Vector2[][] FlattenGlyphForWebGpu(SKPath path, float ox, float oy)
+	{
+		const int steps = 8;
+		var contours = new List<global::System.Numerics.Vector2[]>();
+		List<global::System.Numerics.Vector2>? cur = null;
+		var pts = new SKPoint[4];
+		using var it = path.CreateIterator(false);
+		SKPathVerb verb;
+		while ((verb = it.Next(pts)) != SKPathVerb.Done)
+		{
+			switch (verb)
+			{
+				case SKPathVerb.Move:
+					if (cur is { Count: >= 2 }) { contours.Add(cur.ToArray()); }
+					cur = new() { new global::System.Numerics.Vector2(pts[0].X + ox, pts[0].Y + oy) };
+					break;
+				case SKPathVerb.Line:
+					cur!.Add(new global::System.Numerics.Vector2(pts[1].X + ox, pts[1].Y + oy));
+					break;
+				case SKPathVerb.Quad:
+				case SKPathVerb.Conic:
+					for (int i = 1; i <= steps; i++)
+					{
+						float t = i / (float)steps, u = 1 - t;
+						cur!.Add(new global::System.Numerics.Vector2(
+							u * u * (pts[0].X + ox) + 2 * u * t * (pts[1].X + ox) + t * t * (pts[2].X + ox),
+							u * u * (pts[0].Y + oy) + 2 * u * t * (pts[1].Y + oy) + t * t * (pts[2].Y + oy)));
+					}
+					break;
+				case SKPathVerb.Cubic:
+					for (int i = 1; i <= steps; i++)
+					{
+						float t = i / (float)steps, u = 1 - t;
+						cur!.Add(new global::System.Numerics.Vector2(
+							u * u * u * (pts[0].X + ox) + 3 * u * u * t * (pts[1].X + ox) + 3 * u * t * t * (pts[2].X + ox) + t * t * t * (pts[3].X + ox),
+							u * u * u * (pts[0].Y + oy) + 3 * u * u * t * (pts[1].Y + oy) + 3 * u * t * t * (pts[2].Y + oy) + t * t * t * (pts[3].Y + oy)));
+					}
+					break;
+				case SKPathVerb.Close:
+					if (cur is { Count: >= 2 }) { contours.Add(cur.ToArray()); }
+					cur = null;
+					break;
+			}
+		}
+		if (cur is { Count: >= 2 }) { contours.Add(cur.ToArray()); }
+		return contours.ToArray();
 	}
 
 	public void Draw(in Visual.PaintingSession session,

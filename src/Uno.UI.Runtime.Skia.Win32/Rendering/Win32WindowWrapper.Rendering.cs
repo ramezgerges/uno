@@ -44,12 +44,20 @@ internal partial class Win32WindowWrapper
 	}
 
 	/// <summary>
-	/// Called on the render thread. Replays the last recorded SKPicture and returns the clip
-	/// path and client dimensions for CopyPixels, or null when there is no frame to present
-	/// yet (avoids presenting an uninitialised back buffer before the first render).
+	/// Called on the render thread. For the Skia path, replays the last recorded SKPicture and returns the clip
+	/// path and client dimensions for CopyPixels (null when there is no frame to present yet). The EXPERIMENTAL
+	/// WebGPU backend renders and presents on THIS render thread (build included, like the Skia path) so the
+	/// vsync-blocking swapchain acquire never stalls the UI thread; it presents itself, so it returns null and
+	/// CopyPixels is skipped (SoftwareRenderer.StartPaint/EndPaint are no-ops).
 	/// </summary>
 	private unsafe (SKPath clipPath, int width, int height)? DrawFrame()
 	{
+		if (_useWebGpu)
+		{
+			RenderWebGpu();
+			return null;
+		}
+
 		var ct = ((IXamlRootHost)this).RootElement?.Visual.CompositionTarget as CompositionTarget;
 		if (ct is null || _rendererDisposed)
 		{

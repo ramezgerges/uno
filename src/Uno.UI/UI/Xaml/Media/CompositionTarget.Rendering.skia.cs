@@ -37,6 +37,13 @@ public partial class CompositionTarget
 
 	// only set on the UI thread and under _frameGate, only read under _frameGate
 	private (IntPtr frame, SKPath nativeElementClipPath)? _lastRenderedFrame;
+
+	// EXPERIMENTAL WebGPU backend: when a WebGPU renderer sets this factory, each UI-thread
+	// Render() builds a WebGpuDrawList from the visual tree instead of recording an SKPicture.
+	// The list is swapped here (under _frameGate) for the render thread to GPU-render + present.
+	internal Func<int, int, float, Microsoft.UI.Composition.IWebGpuDrawList>? WebGpuDrawListFactory { get; set; }
+	private Microsoft.UI.Composition.IWebGpuDrawList? _lastWebGpuDrawList; // under _frameGate
+
 	// only set and read under _xamlRootBoundsGate
 	private Size _xamlRootBounds;
 	// only set and read under _xamlRootBoundsGate
@@ -82,6 +89,56 @@ public partial class CompositionTarget
 
 		var rootElement = ContentRoot.VisualTree.RootElement;
 		var bounds = ContentRoot.VisualTree.Size;
+
+		// EXPERIMENTAL WebGPU backend: walk the tree into a WebGpuDrawList instead of recording an
+		// SKPicture. Runs here on the UI thread (right after the timeline tick), so it's safe from
+		// concurrent Children mutations and reuses the entire frame state machine below.
+		if (WebGpuDrawListFactory is { } webGpuFactory)
+		{
+			// bounds are in logical (view) pixels; the GPU frame must be rendered at physical pixels or it gets
+			// upscaled at present (blurry + only partly covering a high-DPI window). Read the scale the same robust
+			// way as UpdateXamlRootBoundsAndScale (DisplayInformation, not the async _rasterizationScale field).
+			var rasterizationScale = rootElement.XamlRoot is { } xamlRoot
+				? (float)XamlRoot.GetDisplayInformation(xamlRoot).RawPixelsPerViewPixel
+				: 1f;
+			// Perf bisection: UNO_WEBGPU_FORCE_SCALE pins the render scale so we can render the offscreen +
+			// swapchain at logical size (=1) — the pre-DPI-fix behaviour — to confirm whether the physical-res
+			// render is what introduced the present/acquire back-pressure on high-DPI displays.
+			if (global::System.Environment.GetEnvironmentVariable("UNO_WEBGPU_FORCE_SCALE") is { Length: > 0 } forcedScaleText
+				&& float.TryParse(forcedScaleText, global::System.Globalization.NumberStyles.Float, global::System.Globalization.CultureInfo.InvariantCulture, out var forcedScale)
+				&& forcedScale > 0)
+			{
+				rasterizationScale = forcedScale;
+			}
+			var drawList = webGpuFactory((int)bounds.Width, (int)bounds.Height, rasterizationScale);
+			bool webGpuPerf = global::System.Environment.GetEnvironmentVariable("UNO_RENDER_PERF") == "1";
+			long buildStart = webGpuPerf ? global::System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+			rootElement.Visual.RenderRootVisualWebGpu(drawList);
+			if (webGpuPerf)
+			{
+				var buildMs = (global::System.Diagnostics.Stopwatch.GetTimestamp() - buildStart) * 1000.0 / global::System.Diagnostics.Stopwatch.Frequency;
+				global::System.Console.WriteLine($"[PERF] wgpu.build (UI-thread tree walk + glyph flatten)={buildMs:F2} ms");
+			}
+			lock (_frameGate)
+			{
+				_lastWebGpuDrawList = drawList;
+			}
+
+			_fpsHelper.OnFrameRecorded();
+
+			if (_isRenderingActive)
+			{
+				((ICompositionTarget)this).RequestNewFrame();
+			}
+
+			if (rootElement.XamlRoot is not null)
+			{
+				XamlRootMap.GetHostForRoot(rootElement.XamlRoot)?.InvalidateRender();
+			}
+
+			FrameRendered?.Invoke();
+			return;
+		}
 
 		var (picture, path, nativeVisualsInZOrder) = SkiaRenderHelper.RecordPictureAndReturnPath(
 			(float)bounds.Width,

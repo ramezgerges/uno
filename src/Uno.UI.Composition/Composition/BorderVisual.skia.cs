@@ -142,6 +142,52 @@ internal class BorderVisual(Compositor compositor) : ContainerVisual(compositor)
 		_borderShape?.Render(in session);
 	}
 
+	// EXPERIMENTAL WebGPU path: mirror Skia's Paint exactly by reusing the very same _backgroundShape/_borderShape
+	// (built by UpdatePathsAndCornerClip) — they carry the precise background path (honouring
+	// UseInnerBorderBoundsAsAreaForBackground), the even-odd border-ring annulus, and full elliptical (X/Y) corner
+	// radii. The background is drawn here (before children); the border ring is drawn over children (see below).
+	internal override void PaintWebGpu(IWebGpuDrawList draw, SKRect clipInRoot, float opacity)
+	{
+		if (Size.X <= 0 || Size.Y <= 0)
+		{
+			return;
+		}
+
+		UpdatePathsAndCornerClip();
+
+		if (_backgroundShape is { } backgroundShape)
+		{
+			backgroundShape.PaintWebGpu(draw, TotalMatrix, ToClip(clipInRoot), opacity);
+		}
+	}
+
+	// Skia draws the border ring last — after base.Paint(children) — so it sits on top of the content. The WebGPU
+	// walk calls this after rendering children, outside the child corner-clip, matching that ordering.
+	internal override void PaintOverChildrenWebGpu(IWebGpuDrawList draw, SKRect clipInRoot, float opacity)
+	{
+		if (Size.X <= 0 || Size.Y <= 0)
+		{
+			return;
+		}
+
+		UpdatePathsAndCornerClip();
+
+		if (_borderShape is { } borderShape)
+		{
+			borderShape.PaintWebGpu(draw, TotalMatrix, ToClip(clipInRoot), opacity);
+		}
+	}
+
+	private static System.Numerics.Vector4 ToClip(SKRect r) => new(r.Left, r.Top, r.Right, r.Bottom);
+
+	private protected override RectangleClip? GetWebGpuPostRoundedClip()
+	{
+		// The corner clip (inner rounded rect that clips children) is computed in UpdatePathsAndCornerClip,
+		// which the WebGPU paint path doesn't otherwise call — refresh it here.
+		UpdatePathsAndCornerClip();
+		return _childClipCausedByCornerRadius;
+	}
+
 	internal override bool GetPrePaintingClipping(SKPath dst)
 	{
 		// This method is only important for airspace (to accurately deal with corner radii, etc.),

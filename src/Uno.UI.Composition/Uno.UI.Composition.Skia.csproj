@@ -32,6 +32,11 @@
 		<PackageReference Include="SkiaSharp" />
 	</ItemGroup>
 
+	<!-- EXPERIMENTAL: lets the standalone WebGPU experiment harness reach internal render entry points. -->
+	<ItemGroup>
+		<InternalsVisibleTo Include="WebGpuExperiment" />
+	</ItemGroup>
+
 	<ItemGroup>
 		<ProjectReference Include="..\Uno.UWP\Uno.Reference.csproj" Condition="'$(SyncGeneratorRunning)'!='true'" />
 		<ProjectReference Include="..\Uno.UWP\Uno.Skia.csproj" Condition="'$(SyncGeneratorRunning)'=='true'" />
