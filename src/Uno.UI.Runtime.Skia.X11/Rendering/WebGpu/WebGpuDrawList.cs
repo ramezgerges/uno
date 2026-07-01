@@ -163,7 +163,7 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 	// on push/pop instead of redrawing the whole stack each time — cuts the full-screen depth-write overdraw that
 	// dominated clipped scenes. Default OFF: has a visual regression under investigation (greyed content); when off
 	// we use the legacy full-rebuild-every-change path (correct but O(stack) per clip op).
-	private static readonly bool _clipIncremental = Environment.GetEnvironmentVariable("UNO_WEBGPU_CLIPOPT") == "1";
+	private static readonly bool _clipIncremental = Environment.GetEnvironmentVariable("UNO_WEBGPU_CLIPOPT") != "0"; // default ON (set =0 to fall back to full-rebuild)
 	private readonly record struct POp(byte Kind, uint A, uint B, uint C, uint D); // 0=Scissor(x,y,w,h) 1=StencilRef(A) 2=ExecuteBundle(A)
 	private readonly List<POp> _prog = new();
 	private readonly List<GpuRenderBundle> _bundles = new();
