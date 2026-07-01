@@ -416,7 +416,7 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 	// NDC-baked, so they're translation-offset like the non-arena replay (guarded by the linear-match check).
 	private void ReplayCachedArena(CachedVisual c, Matrix4x4 matrix, Vector4 clipRect)
 	{
-		float tf = RegisterTransform(matrix);
+		float tf = System.BitConverter.Int32BitsToSingle(RegisterTransform(matrix)); // raw int bits (Uint32 attribute)
 		float nx = (matrix.M41 - c.Matrix.M41) * _scale / _w * 2f;
 		float ny = -((matrix.M42 - c.Matrix.M42) * _scale) / _h * 2f;
 		int baseSolid = _solidVerts.Count / 6, baseRr = _rrVerts.Count / 14, basePath = _pathVerts.Count / 3, baseCover = _coverVerts.Count / 7;
@@ -579,7 +579,9 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 			// (and the Clip/Backdrop FanStart that references it) untouched; visual fills go to the scratch buffer.
 			var pv = (_slabEnabled && dyn) ? _pathDyn : _pathVerts;
 			var cv = (_slabEnabled && dyn) ? _coverDyn : _coverVerts;
-			float tf = RegisterTransform(m);
+			// Transform index is a Uint32 vertex attribute: store the raw integer BITS in the float slot (the shader
+			// reads it as u32 directly, no float→uint conversion — some Intel Vulkan drivers mishandle that).
+			float tf = System.BitConverter.Int32BitsToSingle(RegisterTransform(m));
 			fanStart = pv.Count / 3; fanCount = 0; coverStart = 0;
 			Vector2? anchorOpt = null;
 			foreach (var ct in contours) { if (ct.Length >= 2) { anchorOpt = new Vector2(ct[0].X + localOffset.X, ct[0].Y + localOffset.Y); break; } }
@@ -991,8 +993,8 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 	private const string StencilArenaWgsl = """
 		struct Xf { a : vec4f, b : vec4f }
 		@group(0) @binding(0) var<storage, read> xf : array<Xf>;
-		@vertex fn vs_main(@location(0) p : vec2f, @location(1) ti : f32) -> @builtin(position) vec4f {
-			let t = xf[u32(ti)];
+		@vertex fn vs_main(@location(0) p : vec2f, @location(1) ti : u32) -> @builtin(position) vec4f {
+			let t = xf[ti];
 			return vec4f(p.x*t.a.x + p.y*t.a.y + t.a.z, p.x*t.a.w + p.y*t.b.x + t.b.y, 0, 1);
 		}
 		@fragment fn fs_main() -> @location(0) vec4f { return vec4f(0); }
@@ -1001,8 +1003,8 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 		struct Xf { a : vec4f, b : vec4f }
 		@group(0) @binding(0) var<storage, read> xf : array<Xf>;
 		struct VSOut { @builtin(position) pos : vec4f, @location(0) col : vec4f }
-		@vertex fn vs_main(@location(0) p : vec2f, @location(1) c : vec4f, @location(2) ti : f32) -> VSOut {
-			let t = xf[u32(ti)];
+		@vertex fn vs_main(@location(0) p : vec2f, @location(1) c : vec4f, @location(2) ti : u32) -> VSOut {
+			let t = xf[ti];
 			var o:VSOut; o.pos=vec4f(p.x*t.a.x + p.y*t.a.y + t.a.z, p.x*t.a.w + p.y*t.b.x + t.b.y, 0, 1); o.col=c; return o;
 		}
 		@fragment fn fs_main(@location(0) c : vec4f) -> @location(0) vec4f { return c; }
@@ -1248,14 +1250,14 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 			using (var m = ctx.CreateShaderModuleWgsl("pstencil", _arenaEnabled ? StencilArenaWgsl : StencilWgsl))
 				cache.AddPipe("pstencil", ctx.CreateRenderPipeline("pstencil", m,
 					vertexLayouts: _arenaEnabled
-						? [new VLayout(12, [new(VertexFormat.Float32x2, 0, 0), new(VertexFormat.Float32, 8, 1)])]
+						? [new VLayout(12, [new(VertexFormat.Float32x2, 0, 0), new(VertexFormat.Uint32, 8, 1)])]
 						: [new VLayout(8, [new(VertexFormat.Float32x2, 0, 0)])],
 					bindGroupLayouts: _arenaEnabled ? [[xformBgl]] : [],
 					depthStencil: StencilState(StencilOperation.Invert, CompareFunction.Always), writeMask: 0, sampleCount: msaa));
 			using (var m = ctx.CreateShaderModuleWgsl("pcover", _arenaEnabled ? CoverArenaWgsl : CoverWgsl))
 				cache.AddPipe("pcover", ctx.CreateRenderPipeline("pcover", m,
 					vertexLayouts: _arenaEnabled
-						? [new VLayout(28, [new(VertexFormat.Float32x2, 0, 0), new(VertexFormat.Float32x4, 8, 1), new(VertexFormat.Float32, 24, 2)])]
+						? [new VLayout(28, [new(VertexFormat.Float32x2, 0, 0), new(VertexFormat.Float32x4, 8, 1), new(VertexFormat.Uint32, 24, 2)])]
 						: [new VLayout(24, [new(VertexFormat.Float32x2, 0, 0), new(VertexFormat.Float32x4, 8, 1)])],
 					bindGroupLayouts: _arenaEnabled ? [[xformBgl]] : [],
 					blend: SrcOver, depthStencil: StencilState(StencilOperation.Zero, CompareFunction.NotEqual), sampleCount: msaa));
