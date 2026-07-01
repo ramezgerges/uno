@@ -847,11 +847,14 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 	// Depth carries the rounded-clip mask: 0 = inside clip (or no clip), 1 = clipped out. Content vertices
 	// have z=0, so GreaterEqual passes inside (0>=0) and fails in clipped corners (0>=1). Independent of the
 	// stencil even-odd used for path fills, so both tests AND together.
-	private static DepthStencilState StencilState(StencilOperation passOp, CompareFunction compare) => new()
+	private static DepthStencilState StencilState(StencilOperation passOp, CompareFunction compare, CompareFunction depthCompare = CompareFunction.GreaterEqual) => new()
 	{
 		Format = TextureFormat.Depth24PlusStencil8,
 		DepthWriteEnabled = false,
-		DepthCompare = CompareFunction.GreaterEqual,
+		// GreaterEqual for content fills (clip mask applied here). Always for CLIP-PATH even-odd: the stencil
+		// accumulation must NOT be depth-clipped (DepthFailOp=Keep would skip inverts where depth=1, corrupting
+		// parity) — the clip is applied by the cover pass instead. Matched with the Always clipPathCover (no leak).
+		DepthCompare = depthCompare,
 		StencilReadMask = 0xFF,
 		StencilWriteMask = 0xFF,
 		StencilFront = new StencilFaceState { Compare = compare, FailOp = StencilOperation.Keep, DepthFailOp = StencilOperation.Keep, PassOp = passOp },
@@ -1247,13 +1250,22 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 			// Path fill (stencil-then-cover) pipelines. ARENA variants take a per-vertex transform index + a
 			// read-only storage buffer of per-visual affines (verts are local); plain variants take NDC verts.
 			var xformBgl = new BindGroupLayoutEntry { Binding = 0, Visibility = ShaderStage.Vertex, Buffer = new() { Type = BufferBindingType.ReadOnlyStorage } };
+			VLayout[] stencilVL = _arenaEnabled
+				? [new VLayout(12, [new(VertexFormat.Float32x2, 0, 0), new(VertexFormat.Uint32, 8, 1)])]
+				: [new VLayout(8, [new(VertexFormat.Float32x2, 0, 0)])];
 			using (var m = ctx.CreateShaderModuleWgsl("pstencil", _arenaEnabled ? StencilArenaWgsl : StencilWgsl))
 				cache.AddPipe("pstencil", ctx.CreateRenderPipeline("pstencil", m,
-					vertexLayouts: _arenaEnabled
-						? [new VLayout(12, [new(VertexFormat.Float32x2, 0, 0), new(VertexFormat.Uint32, 8, 1)])]
-						: [new VLayout(8, [new(VertexFormat.Float32x2, 0, 0)])],
+					vertexLayouts: stencilVL,
 					bindGroupLayouts: _arenaEnabled ? [[xformBgl]] : [],
 					depthStencil: StencilState(StencilOperation.Invert, CompareFunction.Always), writeMask: 0, sampleCount: msaa));
+			// Clip-path even-odd stencil: identical to pstencil but depth test ALWAYS, so the clip-path fan's
+			// inverts aren't skipped where a prior clip mask left depth=1 (which corrupts the even-odd parity and
+			// floods the clip). Paired with the Always clipPathCover, so no stencil leak. Content fills keep pstencil.
+			using (var m = ctx.CreateShaderModuleWgsl("pstencil-clip", _arenaEnabled ? StencilArenaWgsl : StencilWgsl))
+				cache.AddPipe("pstencil-clip", ctx.CreateRenderPipeline("pstencil-clip", m,
+					vertexLayouts: stencilVL,
+					bindGroupLayouts: _arenaEnabled ? [[xformBgl]] : [],
+					depthStencil: StencilState(StencilOperation.Invert, CompareFunction.Always, CompareFunction.Always), writeMask: 0, sampleCount: msaa));
 			using (var m = ctx.CreateShaderModuleWgsl("pcover", _arenaEnabled ? CoverArenaWgsl : CoverWgsl))
 				cache.AddPipe("pcover", ctx.CreateRenderPipeline("pcover", m,
 					vertexLayouts: _arenaEnabled
@@ -1279,6 +1291,7 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 		var clipClearPipe = cache.Pipe("clipc");
 		var clipPathCoverPipe = cache.Pipe("clippc");
 		var stencilPipeline = cache.Pipe("pstencil");
+		var clipStencilPipe = cache.Pipe("pstencil-clip"); // depth-Always variant for clip-path even-odd (see pipeline creation)
 		var coverPipeline = cache.Pipe("pcover");
 		var sampler = cache.Sampler;
 
@@ -1430,7 +1443,7 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 				{
 					// even-odd stencil the path, then write depth=1 where stencil==0 (outside the path)
 					EStencil(0);
-					EPipeline(stencilPipeline); if (_arenaEnabled) { EBind(xformBg); } EVB(pathDynVb, (ulong)(pathDynCount * 4)); EDraw((uint)cl.FanCount, (uint)cl.FanStart);
+					EPipeline(clipStencilPipe); if (_arenaEnabled) { EBind(xformBg); } EVB(pathDynVb, (ulong)(pathDynCount * 4)); EDraw((uint)cl.FanCount, (uint)cl.FanStart);
 					EPipeline(clipPathCoverPipe); EDraw(3, 0);
 				}
 			}
