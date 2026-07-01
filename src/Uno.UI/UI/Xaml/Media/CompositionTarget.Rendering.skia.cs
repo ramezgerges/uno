@@ -110,21 +110,33 @@ public partial class CompositionTarget
 			{
 				rasterizationScale = forcedScale;
 			}
-			var drawList = webGpuFactory((int)bounds.Width, (int)bounds.Height, rasterizationScale);
-			bool webGpuPerf = global::System.Environment.GetEnvironmentVariable("UNO_RENDER_PERF") == "1";
-			long buildStart = webGpuPerf ? global::System.Diagnostics.Stopwatch.GetTimestamp() : 0;
-			rootElement.Visual.RenderRootVisualWebGpu(drawList);
-			if (webGpuPerf)
+			// ≤1-in-flight backpressure. The draw list is built here (UI thread) and rendered on the render thread;
+			// there are only two double-buffered draw-list instances. If the previous frame is still pending (the
+			// render thread hasn't picked it up yet), DON'T build another: the UI build far outruns the vsync-paced
+			// render, and building again would let the buffer-toggle rewrite the instance the render thread is mid-
+			// render on → torn commands vs vertices (out-of-bounds draws). Skipping also avoids burning the UI thread
+			// on frames that would just be dropped. When pending is null the render has already taken the last frame,
+			// so the toggle picks the OTHER buffer — never the in-flight one — and the build safely overlaps the render.
+			bool renderBusy;
+			lock (_frameGate) { renderBusy = _lastWebGpuDrawList is not null; }
+			if (!renderBusy)
 			{
-				var buildMs = (global::System.Diagnostics.Stopwatch.GetTimestamp() - buildStart) * 1000.0 / global::System.Diagnostics.Stopwatch.Frequency;
-				global::System.Console.WriteLine($"[PERF] wgpu.build (UI-thread tree walk + glyph flatten)={buildMs:F2} ms");
-			}
-			lock (_frameGate)
-			{
-				_lastWebGpuDrawList = drawList;
-			}
+				var drawList = webGpuFactory((int)bounds.Width, (int)bounds.Height, rasterizationScale);
+				bool webGpuPerf = global::System.Environment.GetEnvironmentVariable("UNO_RENDER_PERF") == "1";
+				long buildStart = webGpuPerf ? global::System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+				rootElement.Visual.RenderRootVisualWebGpu(drawList);
+				if (webGpuPerf)
+				{
+					var buildMs = (global::System.Diagnostics.Stopwatch.GetTimestamp() - buildStart) * 1000.0 / global::System.Diagnostics.Stopwatch.Frequency;
+					global::System.Console.WriteLine($"[PERF] wgpu.build (UI-thread tree walk + glyph flatten)={buildMs:F2} ms");
+				}
+				lock (_frameGate)
+				{
+					_lastWebGpuDrawList = drawList;
+				}
 
-			_fpsHelper.OnFrameRecorded();
+				_fpsHelper.OnFrameRecorded();
+			}
 
 			if (_isRenderingActive)
 			{

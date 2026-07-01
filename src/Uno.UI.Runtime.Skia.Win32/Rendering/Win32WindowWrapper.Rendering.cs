@@ -54,6 +54,10 @@ internal partial class Win32WindowWrapper
 	{
 		if (_useWebGpu)
 		{
+			// No DwmFlush pacing here: unlike the software/GL BitBlt presents (which return immediately and need the
+			// pacer), WebGPU's Fifo swapchain present already blocks on SurfaceGetCurrentTexture (vsync). Pacing on
+			// top would double-block to 30fps. Overproduction is instead prevented by the ≤1-in-flight backpressure
+			// in CompositionTarget (skip building when the previous frame is still pending).
 			RenderWebGpu();
 			return null;
 		}

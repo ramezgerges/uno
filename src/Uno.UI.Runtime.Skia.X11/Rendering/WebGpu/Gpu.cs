@@ -34,6 +34,19 @@ public readonly unsafe struct GpuDevice(WebGPU wgpu, Device* ptr) : IDisposable
     public GpuTexture CreateTexture(TextureDescriptor d) => new(Wgpu, Wgpu.DeviceCreateTexture(Ptr, ref d));
     public GpuSampler CreateSampler(SamplerDescriptor d) => new(Wgpu, Wgpu.DeviceCreateSampler(Ptr, ref d));
     public GpuCommandEncoder CreateCommandEncoder(CommandEncoderDescriptor d) => new(Wgpu, Wgpu.DeviceCreateCommandEncoder(Ptr, ref d));
+    // colorFormat/depthFormat/sampleCount MUST match the render pass the bundle will execute in.
+    public GpuRenderBundleEncoder CreateRenderBundleEncoder(TextureFormat colorFormat, TextureFormat depthFormat, uint sampleCount)
+    {
+        var cf = colorFormat;
+        var d = new RenderBundleEncoderDescriptor
+        {
+            ColorFormatCount = 1,
+            ColorFormats = &cf,
+            DepthStencilFormat = depthFormat,
+            SampleCount = sampleCount,
+        };
+        return new GpuRenderBundleEncoder(Wgpu, Wgpu.DeviceCreateRenderBundleEncoder(Ptr, ref d));
+    }
     public GpuShaderModule CreateShaderModule(ShaderModuleDescriptor d) => new(Wgpu, Wgpu.DeviceCreateShaderModule(Ptr, ref d));
     public GpuBindGroupLayout CreateBindGroupLayout(BindGroupLayoutDescriptor d) => new(Wgpu, Wgpu.DeviceCreateBindGroupLayout(Ptr, ref d));
     public GpuBindGroup CreateBindGroup(BindGroupDescriptor d) => new(Wgpu, Wgpu.DeviceCreateBindGroup(Ptr, ref d));
@@ -139,7 +152,33 @@ public readonly unsafe struct GpuRenderPassEncoder(WebGPU wgpu, RenderPassEncode
     public void SetScissorRect(uint x, uint y, uint width, uint height) => Wgpu.RenderPassEncoderSetScissorRect(Ptr, x, y, width, height);
     public void SetStencilReference(uint reference) => Wgpu.RenderPassEncoderSetStencilReference(Ptr, reference);
     public void End() => Wgpu.RenderPassEncoderEnd(Ptr);
+    public void ExecuteBundles(RenderBundle** bundles, nuint count) => Wgpu.RenderPassEncoderExecuteBundles(Ptr, count, bundles);
     public void Dispose() => Wgpu.RenderPassEncoderRelease(Ptr);
+}
+
+// Records a reusable sequence of draw commands (pipeline/bindgroup/vertexbuffer/draw) that can be replayed cheaply
+// in a render pass via ExecuteBundles — avoids re-encoding the same draws every frame. Cannot set scissor/stencil-
+// reference/viewport (those stay pass-level). The encoder's color/depth formats + sample count must match the pass.
+public readonly unsafe struct GpuRenderBundleEncoder(WebGPU wgpu, RenderBundleEncoder* ptr)
+{
+    public readonly WebGPU Wgpu = wgpu;
+    public readonly RenderBundleEncoder* Ptr = ptr;
+    public void SetPipeline(RenderPipeline* pipeline) => Wgpu.RenderBundleEncoderSetPipeline(Ptr, pipeline);
+    public void SetBindGroup(uint groupIndex, BindGroup* group, nuint dynamicOffsetCount, uint* dynamicOffsets) => Wgpu.RenderBundleEncoderSetBindGroup(Ptr, groupIndex, group, dynamicOffsetCount, dynamicOffsets);
+    public void SetVertexBuffer(uint slot, Buffer* buffer, ulong offset, ulong size) => Wgpu.RenderBundleEncoderSetVertexBuffer(Ptr, slot, buffer, offset, size);
+    public void Draw(uint vertexCount, uint instanceCount, uint firstVertex, uint firstInstance) => Wgpu.RenderBundleEncoderDraw(Ptr, vertexCount, instanceCount, firstVertex, firstInstance);
+    public GpuRenderBundle Finish()
+    {
+        var desc = new RenderBundleDescriptor();
+        return new GpuRenderBundle(Wgpu, Wgpu.RenderBundleEncoderFinish(Ptr, ref desc));
+    }
+}
+
+public readonly unsafe struct GpuRenderBundle(WebGPU wgpu, RenderBundle* ptr) : IDisposable
+{
+    public readonly WebGPU Wgpu = wgpu;
+    public readonly RenderBundle* Ptr = ptr;
+    public void Dispose() => Wgpu.RenderBundleRelease(Ptr);
 }
 
 public readonly unsafe struct GpuShaderModule(WebGPU wgpu, ShaderModule* ptr) : IDisposable

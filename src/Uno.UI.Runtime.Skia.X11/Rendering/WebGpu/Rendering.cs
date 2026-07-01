@@ -264,18 +264,28 @@ public static unsafe class Rendering
             depthPtr = &depthAttachment;
         }
 
+        // GPU-side per-pass timing (UNO_WEBGPU_GPUTIME=1): stamp begin/end of the fast-path scene pass. This is the
+        // whole offscreen render (all draws + clear + MSAA resolve at pass-end) as a single trustworthy GPU number —
+        // the segmented path stamps its sub-passes separately. A/B recipes: MSAA=1 vs 4 isolates the resolve cost;
+        // UNO_WEBGPU_NOTEXT on/off isolates the text stencil-then-cover cost (both compare this "scene" number).
+        uint sceneTb = 0, sceneTe = 0;
+        bool sceneTimed = targets.Timer is { } gtm && gtm.TryPass("scene", out sceneTb, out sceneTe);
+        RenderPassTimestampWrites sceneTw = sceneTimed ? targets.Timer!.Writes(sceneTb, sceneTe) : default;
         var passDesc = new RenderPassDescriptor
         {
             ColorAttachmentCount = 1,
             ColorAttachments = &colorAttachment,
             DepthStencilAttachment = depthPtr,
+            TimestampWrites = sceneTimed ? &sceneTw : null,
         };
         RenderPassEncoder* pass = wgpu.CommandEncoderBeginRenderPass(encoder, ref passDesc);
         draw(new GpuRenderPassEncoder(wgpu, pass));
         wgpu.RenderPassEncoderEnd(pass);
         wgpu.RenderPassEncoderRelease(pass);
         long t2 = perf ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+        targets.Timer?.Resolve(encoder); // encode query-set → staging copy before finishing the encoder
         ctx.FinishAndSubmit(encoder);
+        targets.Timer?.ReadAndLog(); // maps + logs the per-pass GPU deltas (blocks on GPU; diagnostic-only)
         long t3 = perf ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
         // Swapchain present skips the readback: the frame stays in `texture` (cache.Color) for a GPU blit.
         var result = readback ? TextureReadback.ReadRgba8(ctx, texture, width, height) : Array.Empty<byte>();
@@ -425,6 +435,9 @@ public sealed unsafe class WebGpuTargets : IDisposable
             foreach (var e in bucket) { foreach (var d in e.Own) { d.Dispose(); } }
         }
         _bgCache.Clear();
+        // The xform bind group holds a ref to pstencil's group-0 layout; when pipelines are torn down (the caller,
+        // DisposePipelines) that layout dies, so this cached bind group must be dropped too or it dangles.
+        if (_xformBg.Ptr is not null) { _xformBg.Dispose(); _xformBg = default; _xformBgBuf = default; }
     }
 
     // --- Image-texture cache. An image brush's GPU texture depends only on its source pixels, so upload it ONCE
@@ -608,6 +621,66 @@ public sealed unsafe class WebGpuTargets : IDisposable
         return buf.Ptr;
     }
 
+    // Like VertexBuffer, but the caller has already recorded exactly which float ranges changed (the slab's dirty
+    // ranges), so we upload only those — no CommonPrefixLength scan. Falls back to a full upload when the buffer was
+    // (re)allocated or its length changed (a structural change, where the dirty ranges don't describe the whole diff).
+    public Buffer* VertexBufferDirty(WebGpuContext ctx, string key, ReadOnlySpan<float> data, System.Collections.Generic.List<(int off, int len)> ranges)
+    {
+        if (data.Length == 0) { return null; }
+        ulong needed = (ulong)data.Length * sizeof(float);
+        bool fresh = false;
+        if (!_vb.TryGetValue(key, out var buf) || buf.Ptr is null || _vbCap[key] < needed)
+        {
+            if (buf.Ptr is not null) { buf.Dispose(); }
+            ulong cap = (needed + (needed >> 1) + 3UL) & ~3UL;
+            buf = ctx.CreateBuffer(key, cap, BufferUsage.Vertex | BufferUsage.CopyDst);
+            _vb[key] = buf; _vbCap[key] = cap; fresh = true;
+        }
+        if (!fresh && _vbLen.TryGetValue(key, out var prevLen) && prevLen == data.Length)
+        {
+            // Coalesce nearby dirty ranges into fewer, larger WriteBuffers. Each QueueWriteBuffer can stall on
+            // wgpu's staging belt (a full segment waits for the GPU, which is a frame behind on an iGPU), so many
+            // small writes cost far more than a few bigger ones. Neighbouring slab slices are usually contiguous, so
+            // merging across a small gap collapses most of them; the gap bytes we re-upload are cheap vs a stall.
+            const int gap = 4096;    // floats — bridge this much clean space rather than start a new write
+            const int maxWrites = 4; // each WriteBuffer can stall on the staging belt (~a vsync), so cap the count
+            ranges.Sort(static (a, b) => a.off.CompareTo(b.off));
+            int minOff = ranges[0].off, maxEnd = 0;
+            int merged = 1, mend = ranges[0].off + ranges[0].len;
+            for (int j = 1; j < ranges.Count; j++)
+            {
+                if (ranges[j].off + ranges[j].len > maxEnd) { maxEnd = ranges[j].off + ranges[j].len; }
+                if (ranges[j].off > mend + gap) { merged++; mend = ranges[j].off + ranges[j].len; }
+                else if (ranges[j].off + ranges[j].len > mend) { mend = ranges[j].off + ranges[j].len; }
+            }
+            if (maxEnd < ranges[0].off + ranges[0].len) { maxEnd = ranges[0].off + ranges[0].len; }
+            int wrote = 0, calls = 0;
+            if (merged > maxWrites)
+            {
+                // Too scattered — one bounding write beats many stalls (extra clean bytes are cheaper than the belt waits).
+                ctx.WriteBuffer<float>(buf.Ptr, data.Slice(minOff, maxEnd - minOff), (ulong)minOff * sizeof(float));
+                wrote = maxEnd - minOff; calls = 1;
+            }
+            else
+            {
+                int i = 0;
+                while (i < ranges.Count)
+                {
+                    int off = ranges[i].off, end = off + ranges[i].len, j = i + 1;
+                    while (j < ranges.Count && ranges[j].off <= end + gap) { end = System.Math.Max(end, ranges[j].off + ranges[j].len); j++; }
+                    ctx.WriteBuffer<float>(buf.Ptr, data.Slice(off, end - off), (ulong)off * sizeof(float)); wrote += end - off; calls++;
+                    i = j;
+                }
+            }
+            if (_vbStats) { VbStat(key, $"DIRTY({calls}w)", wrote, data.Length); }
+            return buf.Ptr;
+        }
+        ctx.WriteBuffer<float>(buf.Ptr, data);
+        _vbLen[key] = data.Length;
+        if (_vbStats) { VbStat(key, fresh ? "FULL(fresh/grow)" : "FULL(len-changed)", data.Length, data.Length); }
+        return buf.Ptr;
+    }
+
     // Read-only storage buffer (persistent, grown 1.5×, rewritten each frame). Used for the arena's per-visual
     // transform table — small, so a full WriteBuffer each frame is fine.
     public Buffer* StorageBuffer(WebGpuContext ctx, string key, ReadOnlySpan<float> data)
@@ -649,8 +722,7 @@ public sealed unsafe class WebGpuTargets : IDisposable
         _pool.Clear();
         foreach (var b in _vb.Values) { if (b.Ptr is not null) { b.Dispose(); } }
         _vb.Clear(); _vbCap.Clear(); _vbShadow.Clear(); _vbLen.Clear();
-        if (_xformBg.Ptr is not null) { _xformBg.Dispose(); _xformBg = default; _xformBgBuf = default; }
-        ClearBindGroupCache();
+        ClearBindGroupCache(); // also drops the cached xform bind group
         ClearImageTexCache();
         Timer?.Dispose(); Timer = null;
     }

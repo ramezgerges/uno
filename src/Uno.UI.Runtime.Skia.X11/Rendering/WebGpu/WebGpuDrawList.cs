@@ -136,12 +136,38 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 	// it is NOT relocated — it stays in its own small per-frame buffer at append offsets, re-uploaded each frame.
 	private readonly List<float> _pathDyn = new(), _coverDyn = new();
 	private bool _slabActive;            // this frame's visual fills were placed into the slab buffers (== _slabEnabled)
-	private readonly record struct Unit(long Id, int PStart, int PLen, int CStart, int CLen, int CmdStart, int CmdEnd);
+	private readonly record struct Unit(long Id, int PStart, int PLen, int CStart, int CLen, int CmdStart, int CmdEnd, bool Dirty);
+	// Dirty-range upload (UNO_WEBGPU_DIRTY=1, needs SLAB+CACHE): instead of CommonPrefixLength scanning the whole slab
+	// buffer every frame to find what changed, mark a visual's slice dirty AT the mutation — re-emitted content (cache
+	// miss) or a changed transform-index/offset — and upload only those float ranges. Everything else clean by default.
+	private static readonly bool _dirtyEnabled = _slabEnabled && Environment.GetEnvironmentVariable("UNO_WEBGPU_DIRTY") == "1";
+	private readonly List<(int off, int len)> _dirtyPath = new(), _dirtyCover = new(); // float ranges changed this frame
+	private static readonly Dictionary<long, (float tf, int pOff, int cOff)> _lastVis = new(); // per-visual last placement (UI thread)
+	private bool _curContentDirty;       // set per visual: was its own-paint content re-emitted (cache miss) this frame
 	private readonly List<Unit> _units = new();
 	private readonly HashSet<long> _liveIds = new();
 	private long _curId = -1; private int _curPStart, _curCStart, _curCmdStart, _visualDepth;
 	private static readonly bool _slabDiag = Environment.GetEnvironmentVariable("UNO_WEBGPU_SLAB_STATS") == "1";
 	private static int _slabDiagN;
+	// Coalesce a run of consecutive PathFills into one stencil + one cover draw (cuts the per-glyph encode).
+	// Correct only when the glyphs' even-odd fill regions don't overlap (normal text); opt-in for safety.
+	private static readonly bool _coalescePaths = Environment.GetEnvironmentVariable("UNO_WEBGPU_COALESCE") == "1";
+
+	// Render bundles (UNO_WEBGPU_BUNDLE=1, fast path only): record the scene's draws into reusable RenderBundles once,
+	// then ExecuteBundles each frame instead of re-encoding hundreds of draw calls. Scissor/stencil-ref (not allowed
+	// in bundles) become pass-level ops in _prog, which segments the bundles. Re-recorded only when the command
+	// STRUCTURE (kinds/offsets/counts/scissors) changes — content/transform/colour flow through the buffers, so
+	// scroll/animation/idle replay the same bundles. Default OFF; DrawScene is unchanged for the direct path.
+	private static readonly bool _bundleEnabled = _arenaEnabled && Environment.GetEnvironmentVariable("UNO_WEBGPU_BUNDLE") == "1";
+	// Incremental clip mask: skip the depth mask for pure-rect clips (scissor handles them) and add/rebuild masks
+	// on push/pop instead of redrawing the whole stack each time — cuts the full-screen depth-write overdraw that
+	// dominated clipped scenes. Default OFF: has a visual regression under investigation (greyed content); when off
+	// we use the legacy full-rebuild-every-change path (correct but O(stack) per clip op).
+	private static readonly bool _clipIncremental = Environment.GetEnvironmentVariable("UNO_WEBGPU_CLIPOPT") == "1";
+	private readonly record struct POp(byte Kind, uint A, uint B, uint C, uint D); // 0=Scissor(x,y,w,h) 1=StencilRef(A) 2=ExecuteBundle(A)
+	private readonly List<POp> _prog = new();
+	private readonly List<GpuRenderBundle> _bundles = new();
+	private ulong _progHash; private bool _progValid;
 
 	internal bool SlabActive => _slabActive;
 
@@ -154,6 +180,7 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 		if (_visualDepth++ == 0)
 		{
 			_curId = id; _curPStart = _pathVerts.Count / 3; _curCStart = _coverVerts.Count / 7; _curCmdStart = _cmds.Count;
+			_curContentDirty = true; // assume re-emitted unless the cache replays it (BeginCachedVisualReplay clears it)
 		}
 	}
 
@@ -165,7 +192,7 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 			int pLen = _pathVerts.Count / 3 - _curPStart;
 			if (pLen > 0)
 			{
-				_units.Add(new Unit(_curId, _curPStart, pLen, _curCStart, _coverVerts.Count / 7 - _curCStart, _curCmdStart, _cmds.Count));
+				_units.Add(new Unit(_curId, _curPStart, pLen, _curCStart, _coverVerts.Count / 7 - _curCStart, _curCmdStart, _cmds.Count, _curContentDirty));
 			}
 			_curId = -1;
 		}
@@ -177,6 +204,7 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 	{
 		if (!_slabEnabled) { return; }
 		_slabActive = true; // visual fills always go to the slab; clip/acrylic geometry lives in the dyn buffers
+		if (_dirtyEnabled) { _dirtyPath.Clear(); _dirtyCover.Clear(); }
 		if (_slabDiag && _slabDiagN++ % 120 == 0)
 		{
 			int total = 0, covered = 0;
@@ -210,6 +238,18 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 			int pOff = _slab.PathOff(u.Id), cOff = _slab.CoverOff(u.Id); // vertex offsets
 			srcP.Slice(u.PStart * 3, u.PLen * 3).CopyTo(dstP.Slice(pOff * 3, u.PLen * 3));
 			if (u.CLen > 0) { srcC.Slice(u.CStart * 7, u.CLen * 7).CopyTo(dstC.Slice(cOff * 7, u.CLen * 7)); }
+			if (_dirtyEnabled)
+			{
+				// Slice is dirty iff its own-paint content was re-emitted, its transform index changed, or it moved
+				// (realloc/new). Otherwise its bytes are byte-identical to last frame → don't upload it.
+				float tf = srcP[u.PStart * 3 + 2];
+				if (u.Dirty || !_lastVis.TryGetValue(u.Id, out var lv) || lv.tf != tf || lv.pOff != pOff || lv.cOff != cOff)
+				{
+					_dirtyPath.Add((pOff * 3, u.PLen * 3));
+					if (u.CLen > 0) { _dirtyCover.Add((cOff * 7, u.CLen * 7)); }
+				}
+				_lastVis[u.Id] = (tf, pOff, cOff);
+			}
 			int pDelta = pOff - u.PStart, cDelta = cOff - u.CStart;
 			if (pDelta == 0 && cDelta == 0) { continue; }
 			for (int i = u.CmdStart; i < u.CmdEnd; i++)
@@ -260,6 +300,7 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 			&& (_arenaEnabled ? (c.NoSolidRr || LinearMatches(c.Matrix, matrix)) : LinearMatches(c.Matrix, matrix)))
 		{
 			if (_arenaEnabled) { ReplayCachedArena(c, matrix, clipRect); } else { ReplayCached(c, matrix, clipRect); }
+			_curContentDirty = false; // replayed unchanged content — its slab slice bytes are the same as last frame
 			return true;
 		}
 		_recording = true;
@@ -688,7 +729,7 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 			return;
 		}
 		_hasClips = true;
-		_clips.Add(new Clip(default, default, true, fanStart, fanCount, coverStart, false));
+		_clips.Add(new Clip(bbox, default, true, fanStart, fanCount, coverStart, false)); // bbox in RectPx so the mask draw can be scissored to it
 		PushCmd(Kind.ClipPush, 0, 0, _clips.Count - 1, bbox);
 	}
 
@@ -1245,8 +1286,13 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 		Buffer* rrVb = cache.VertexBuffer(ctx, "rr", CollectionsMarshal.AsSpan(_rrVerts));
 		// When the slab is active, the visual-fill cmds were patched to address the slab buffers; the clip/acrylic
 		// geometry (Clip/Backdrop-referenced, not relocated) lives in the separate dyn buffers.
-		Buffer* pathVb = cache.VertexBuffer(ctx, "path", CollectionsMarshal.AsSpan(_slabActive ? _pathSlab : _pathVerts));
-		Buffer* coverVb = cache.VertexBuffer(ctx, "cover", CollectionsMarshal.AsSpan(_slabActive ? _coverSlab : _coverVerts));
+		// With dirty-range tracking the slab marked exactly which slices changed, so upload only those (no scan).
+		Buffer* pathVb = _dirtyEnabled
+			? cache.VertexBufferDirty(ctx, "path", CollectionsMarshal.AsSpan(_pathSlab), _dirtyPath)
+			: cache.VertexBuffer(ctx, "path", CollectionsMarshal.AsSpan(_slabActive ? _pathSlab : _pathVerts));
+		Buffer* coverVb = _dirtyEnabled
+			? cache.VertexBufferDirty(ctx, "cover", CollectionsMarshal.AsSpan(_coverSlab), _dirtyCover)
+			: cache.VertexBuffer(ctx, "cover", CollectionsMarshal.AsSpan(_slabActive ? _coverSlab : _coverVerts));
 		int pathCount = _slabActive ? _pathSlab.Count : _pathVerts.Count;
 		int coverCount = _slabActive ? _coverSlab.Count : _coverVerts.Count;
 		Buffer* pathDynVb = _slabActive ? cache.VertexBuffer(ctx, "pathdyn", CollectionsMarshal.AsSpan(_pathDyn)) : pathVb;
@@ -1326,65 +1372,141 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 		// shadow/backdrop coverage sub-renders (each pass clears depth, so we re-establish at its start).
 		var clipStack = new List<int>();
 
+		// Render-bundle recording plumbing. In direct mode the E* helpers forward straight to the current pass (the
+		// only added cost is a well-predicted branch). When bundleRec is set, draws record into a RenderBundle and
+		// scissor/stencil-ref (illegal in bundles) flush the current bundle + append a pass-level op to _prog.
+		bool bundleRec = false;
+		GpuRenderPassEncoder curPass = default;
+		GpuRenderBundleEncoder recBundle = default; bool recHas = false;
+		void EnsureRec() { if (!recHas) { recBundle = device.CreateRenderBundleEncoder(TextureFormat.Rgba8Unorm, TextureFormat.Depth24PlusStencil8, msaa); recHas = true; } }
+		void FlushRec() { if (recHas) { _prog.Add(new POp(2, (uint)_bundles.Count, 0, 0, 0)); _bundles.Add(recBundle.Finish()); recHas = false; } }
+		void EPipeline(GpuRenderPipeline p) { if (bundleRec) { EnsureRec(); recBundle.SetPipeline(p); } else { curPass.SetPipeline(p); } }
+		void EBind(GpuBindGroup bg) { if (bundleRec) { EnsureRec(); recBundle.SetBindGroup(0, bg, 0, null); } else { curPass.SetBindGroup(0, bg, 0, null); } }
+		void EVB(Buffer* b, ulong sz) { if (bundleRec) { EnsureRec(); recBundle.SetVertexBuffer(0, b, 0, sz); } else { curPass.SetVertexBuffer(0, b, 0, sz); } }
+		void EDraw(uint vc, uint fv) { if (bundleRec) { EnsureRec(); recBundle.Draw(vc, 1, fv, 0); } else { curPass.Draw(vc, 1, fv, 0); } }
+		void EScissor(uint x, uint y, uint w, uint h) { if (bundleRec) { FlushRec(); _prog.Add(new POp(0, x, y, w, h)); } else { curPass.SetScissorRect(x, y, w, h); } }
+		void EStencil(uint r) { if (bundleRec) { FlushRec(); _prog.Add(new POp(1, r, 0, 0, 0)); } else { curPass.SetStencilReference(r); } }
+
 		// Draws scene commands [from, to) (skipping Backdrop/Shadow markers, handled by the segmented path).
 		void DrawScene(GpuRenderPassEncoder pass, int from, int to)
 		{
+			curPass = pass;
 			Kind? current = null;
 			// Last scissor pushed to the GPU — dedup redundant SetScissorRect across the many same-clip commands.
 			uint lsx = 0, lsy = 0, lsw = 0, lsh = 0; bool scissorSet = false;
 			// Arena: whether group 0 currently holds the transform table. It persists across path stencil/cover draws
 			// (same layout), so we only re-bind after a non-path pipeline (gradient/image/clip) disturbs group 0.
 			bool xfBound = false;
-			void ReestablishClip()
+			// A clip needs a DEPTH MASK only when it's non-rectangular: rounded corners, an exclude (hole), or an
+			// arbitrary path. Plain axis-aligned rect clips are fully enforced by the per-command scissor rect
+			// (content is DepthWrite=false and tests GreaterEqual against a 0 mask), so they need NO mask draw — the
+			// old code drew a full-screen clipWrite for every rect clip that wrote depth nowhere: 390MB/frame wasted.
+			static bool NeedsMask(in Clip cl) => cl.IsPath || cl.Exclude || cl.RadiiPx.X != 0 || cl.RadiiPx.Y != 0 || cl.RadiiPx.Z != 0 || cl.RadiiPx.W != 0;
+			// Scissor the mask draw to the clip's device bbox (same math as PushCmd). Content under this clip is
+			// scissored to the same rect, and clips nest (inner ⊆ outer), so masking within the bbox is sufficient —
+			// turning full-screen depth writes into small ones. Returns false for a degenerate/empty rect.
+			bool ClipScissor(in Clip cl)
 			{
-				// Reset the clip-mask depth to 0 (full frame), then mark depth=1 in the excluded region of each
-				// active clip — union of exclusions = intersection of the clips. Full-frame scissor for this.
+				float l = Math.Clamp(cl.RectPx.X, 0, _w), t = Math.Clamp(cl.RectPx.Y, 0, _h);
+				float rt = Math.Clamp(cl.RectPx.Z, 0, _w), bt = Math.Clamp(cl.RectPx.W, 0, _h);
+				uint sw = rt > l ? (uint)MathF.Ceiling(rt - l) : 0, sh = bt > t ? (uint)MathF.Ceiling(bt - t) : 0;
+				if (sw == 0 || sh == 0) { return false; }
+				uint x = (uint)MathF.Floor(l), y = (uint)MathF.Floor(t);
+				EScissor(x, y, sw, sh); lsx = x; lsy = y; lsw = sw; lsh = sh; scissorSet = true;
+				return true;
+			}
+			// Draw ONE clip's depth-mask contribution, scissored to its bbox. Additive into the shared mask (no clear).
+			void DrawClipMask(int idx)
+			{
+				var cl = _clips[idx];
+				if (!ClipScissor(cl)) { return; }
+				if (!cl.IsPath)
+				{
+					EPipeline(clipWritePipe); EBind(clipBgs[idx]); EDraw(6, 0);
+				}
+				else
+				{
+					// even-odd stencil the path, then write depth=1 where stencil==0 (outside the path)
+					EStencil(0);
+					EPipeline(stencilPipeline); if (_arenaEnabled) { EBind(xformBg); } EVB(pathDynVb, (ulong)(pathDynCount * 4)); EDraw((uint)cl.FanCount, (uint)cl.FanStart);
+					EPipeline(clipPathCoverPipe); EDraw(3, 0);
+				}
+			}
+			// Rebuild the whole mask: optionally clear depth to 0, then redraw every MASKING clip in the stack.
+			// clear=false at pass start (the pass LoadOp already cleared depth); clear=true after POPPING a masking
+			// clip (its depth=1 can't be selectively un-written, so the mask is rebuilt from the survivors).
+			void RebuildMask(bool clear)
+			{
 				long _tc = System.Diagnostics.Stopwatch.GetTimestamp(); _dbgClipN++;
-				pass.SetScissorRect(0, 0, _w, _h);
-				lsx = 0; lsy = 0; lsw = _w; lsh = _h; scissorSet = true;
-				pass.SetPipeline(clipClearPipe); pass.Draw(3, 1, 0, 0);
+				if (clear) { EScissor(0, 0, _w, _h); EPipeline(clipClearPipe); EDraw(3, 0); }
+				foreach (var idx in clipStack) { if (NeedsMask(_clips[idx])) { DrawClipMask(idx); } }
+				current = null; xfBound = false; scissorSet = false;
+				_dbgClipMs += (System.Diagnostics.Stopwatch.GetTimestamp() - _tc) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+			}
+			// Additively add one just-pushed masking clip to the mask (no clear — existing survivors stay valid).
+			void AddMask(int idx) { _dbgClipN++; DrawClipMask(idx); current = null; xfBound = false; scissorSet = false; }
+			// Legacy path (UNO_WEBGPU_CLIPOPT off): clear depth + redraw EVERY clip on each change, full-screen.
+			// Correct but O(stack) per push/pop — the behavior before the incremental optimization.
+			void RebuildMaskFull()
+			{
+				long _tc = System.Diagnostics.Stopwatch.GetTimestamp(); _dbgClipN++;
+				EScissor(0, 0, _w, _h); lsx = 0; lsy = 0; lsw = _w; lsh = _h; scissorSet = true;
+				EPipeline(clipClearPipe); EDraw(3, 0);
 				foreach (var idx in clipStack)
 				{
 					var cl = _clips[idx];
-					if (!cl.IsPath)
-					{
-						pass.SetPipeline(clipWritePipe); pass.SetBindGroup(0, clipBgs[idx], 0, null); pass.Draw(6, 1, 0, 0);
-					}
-					else
-					{
-						// even-odd stencil the path, then write depth=1 where stencil==0 (outside the path)
-						pass.SetStencilReference(0);
-						pass.SetPipeline(stencilPipeline); if (_arenaEnabled) { pass.SetBindGroup(0, xformBg, 0, null); } pass.SetVertexBuffer(0, pathDynVb, 0, (ulong)(pathDynCount * 4)); pass.Draw((uint)cl.FanCount, 1, (uint)cl.FanStart, 0);
-						pass.SetPipeline(clipPathCoverPipe); pass.Draw(3, 1, 0, 0);
-					}
+					if (!cl.IsPath) { EPipeline(clipWritePipe); EBind(clipBgs[idx]); EDraw(6, 0); }
+					else { EStencil(0); EPipeline(stencilPipeline); if (_arenaEnabled) { EBind(xformBg); } EVB(pathDynVb, (ulong)(pathDynCount * 4)); EDraw((uint)cl.FanCount, (uint)cl.FanStart); EPipeline(clipPathCoverPipe); EDraw(3, 0); }
 				}
 				current = null; xfBound = false;
 				_dbgClipMs += (System.Diagnostics.Stopwatch.GetTimestamp() - _tc) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
 			}
-			if (_hasClips) { ReestablishClip(); } // establish the inherited clip (this pass cleared depth to 0)
+			if (_hasClips) { if (_clipIncremental) { RebuildMask(clear: false); } else { RebuildMaskFull(); } } // establish the inherited clip
 			for (int ci = from; ci < to; ci++)
 			{
 				var cmd = _cmds[ci];
-				if (cmd.Kind == Kind.ClipPush) { clipStack.Add(cmd.Aux); ReestablishClip(); continue; }
-				if (cmd.Kind == Kind.ClipPop) { if (clipStack.Count > 0) { clipStack.RemoveAt(clipStack.Count - 1); } ReestablishClip(); continue; }
+				// Rect clip push/pop touches NO depth mask (scissor handles it) → free. A masking clip push adds its
+				// mask; a masking clip pop rebuilds (can't un-write one clip's depth). This makes clip cost scale with
+				// the number of NON-rect clips, not with every push/pop of the whole stack (was O(stack) each time).
+				if (cmd.Kind == Kind.ClipPush) { clipStack.Add(cmd.Aux); if (_clipIncremental) { if (NeedsMask(_clips[cmd.Aux])) { AddMask(cmd.Aux); } } else { RebuildMaskFull(); } continue; }
+				if (cmd.Kind == Kind.ClipPop) { int popped = clipStack.Count > 0 ? clipStack[^1] : -1; if (popped >= 0) { clipStack.RemoveAt(clipStack.Count - 1); } if (_clipIncremental) { if (popped >= 0 && NeedsMask(_clips[popped])) { RebuildMask(clear: true); } } else { RebuildMaskFull(); } continue; }
 				// Effect markers (Backdrop/Shadow/Layer) are split out by RenderInto and never appear in a scene
 				// range, so they're a no-op here.
 				if (cmd.Kind is Kind.Backdrop or Kind.Shadow or Kind.Layer or Kind.Mask || cmd.Sw == 0 || cmd.Sh == 0) { continue; }
 				// Push the scissor only when it actually changes — most adjacent commands share a clip rect.
 				if (!scissorSet || cmd.Sx != lsx || cmd.Sy != lsy || cmd.Sw != lsw || cmd.Sh != lsh)
 				{
-					pass.SetScissorRect(cmd.Sx, cmd.Sy, cmd.Sw, cmd.Sh);
+					EScissor(cmd.Sx, cmd.Sy, cmd.Sw, cmd.Sh);
 					lsx = cmd.Sx; lsy = cmd.Sy; lsw = cmd.Sw; lsh = cmd.Sh; scissorSet = true;
 				}
 				if (cmd.Kind == Kind.PathFill)
 				{
-					pass.SetStencilReference(0);
-					pass.SetPipeline(stencilPipeline);
-					if (_arenaEnabled && !xfBound) { pass.SetBindGroup(0, xformBg, 0, null); xfBound = true; }
-					pass.SetVertexBuffer(0, pathVb, 0, (ulong)(pathCount * 4));
-					pass.Draw((uint)cmd.Count, 1, (uint)cmd.VertexStart, 0);
-					pass.SetPipeline(coverPipeline); pass.SetVertexBuffer(0, coverVb, 0, (ulong)(coverCount * 4)); // xform bind persists from the stencil draw (same layout)
-					pass.Draw(6, 1, (uint)cmd.Aux, 0);
+					// Coalesce consecutive PathFills (contiguous fan + cover ranges, same scissor) into ONE stencil
+					// draw over all fans + ONE cover draw over all cover quads — one draw pair per text run instead
+					// of per glyph. Only correct when the glyphs' fills don't overlap (opt-in via UNO_WEBGPU_COALESCE).
+					uint fanStart = (uint)cmd.VertexStart, fanCount = (uint)cmd.Count;
+					uint cvStart = (uint)cmd.Aux, cvCount = 6;
+					if (_coalescePaths)
+					{
+						while (ci + 1 < to)
+						{
+							var nxt = _cmds[ci + 1];
+							if (nxt.Kind != Kind.PathFill) { break; }
+							if (nxt.Sx != cmd.Sx || nxt.Sy != cmd.Sy || nxt.Sw != cmd.Sw || nxt.Sh != cmd.Sh) { break; }
+							if ((uint)nxt.VertexStart != fanStart + fanCount || (uint)nxt.Aux != cvStart + cvCount) { break; }
+							fanCount += (uint)nxt.Count; cvCount += 6; ci++;
+						}
+					}
+					// Defensive: never issue a draw past the bound buffer (the ≤1-in-flight backpressure should already
+					// prevent a torn cmds-vs-buffer frame, but a stray out-of-bounds draw is a hard validation error).
+					if (fanStart + fanCount > (uint)pathCount || cvStart + cvCount > (uint)coverCount) { current = null; continue; }
+					EStencil(0);
+					EPipeline(stencilPipeline);
+					if (_arenaEnabled && !xfBound) { EBind(xformBg); xfBound = true; }
+					EVB(pathVb, (ulong)(pathCount * 4));
+					EDraw(fanCount, fanStart);
+					EPipeline(coverPipeline); EVB(coverVb, (ulong)(coverCount * 4)); // xform bind persists from the stencil draw (same layout)
+					EDraw(cvCount, cvStart);
 					current = null;
 					continue;
 				}
@@ -1394,14 +1516,14 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 					if (_arenaEnabled) { xfBound = false; } // a non-path pipeline is being set → group 0 no longer holds the transform table
 					switch (cmd.Kind)
 					{
-						case Kind.Solid: pass.SetPipeline(solidPipeline); pass.SetVertexBuffer(0, solidVb, 0, (ulong)(_solidVerts.Count * 4)); break;
-						case Kind.Gradient: pass.SetPipeline(gradPipeline); pass.SetVertexBuffer(0, gradVb, 0, (ulong)(_gradVerts.Count * 4)); break;
-						case Kind.RoundedRect: pass.SetPipeline(rrPipeline); pass.SetVertexBuffer(0, rrVb, 0, (ulong)(_rrVerts.Count * 4)); break;
-						case Kind.Image: pass.SetPipeline(imgPipeline); pass.SetVertexBuffer(0, imageVb, 0, (ulong)(_imageVerts.Count * 4)); break;
+						case Kind.Solid: EPipeline(solidPipeline); EVB(solidVb, (ulong)(_solidVerts.Count * 4)); break;
+						case Kind.Gradient: EPipeline(gradPipeline); EVB(gradVb, (ulong)(_gradVerts.Count * 4)); break;
+						case Kind.RoundedRect: EPipeline(rrPipeline); EVB(rrVb, (ulong)(_rrVerts.Count * 4)); break;
+						case Kind.Image: EPipeline(imgPipeline); EVB(imageVb, (ulong)(_imageVerts.Count * 4)); break;
 					}
 				}
-				if (cmd.Kind == Kind.Gradient) { pass.SetBindGroup(0, gradBgs[cmd.Aux], 0, null); }
-				else if (cmd.Kind == Kind.Image) { pass.SetBindGroup(0, imgBgs[cmd.Aux], 0, null); }
+				if (cmd.Kind == Kind.Gradient) { EBind(gradBgs[cmd.Aux]); }
+				else if (cmd.Kind == Kind.Image) { EBind(imgBgs[cmd.Aux]); }
 				// Coalesce a run of adjacent commands that share kind + scissor + bind group and whose vertices are
 				// contiguous, into ONE draw call. Per-primitive geometry is already baked into the vertex buffer, so
 				// merging the ranges is identical to issuing them separately — it just removes hundreds of FFI calls.
@@ -1415,15 +1537,57 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 					if ((uint)nxt.VertexStart != vstart + count) { break; }
 					count += (uint)nxt.Count; ci++;
 				}
-				pass.Draw(count, 1, vstart, 0); _dbgDraws++;
+				EDraw(count, vstart); _dbgDraws++;
 			}
+		}
+
+		// Fast-path draw: record bundles on a structure change, then replay them; otherwise encode directly.
+		ulong HashScene()
+		{
+			ulong h = 1469598103934665603UL;
+			void Mix(ulong v) { h = (h ^ v) * 1099511628211UL; }
+			Mix((ulong)_cmds.Count);
+			foreach (var c in _cmds) { Mix((ulong)(byte)c.Kind | ((ulong)(uint)c.VertexStart << 8)); Mix((ulong)(uint)c.Count | ((ulong)(uint)c.Aux << 32)); Mix(c.Sx | ((ulong)c.Sy << 16) | ((ulong)c.Sw << 32) | ((ulong)c.Sh << 48)); }
+			Mix((ulong)pathVb); Mix((ulong)coverVb); Mix((ulong)pathDynVb); Mix((ulong)coverDynVb);
+			Mix((ulong)solidVb); Mix((ulong)gradVb); Mix((ulong)rrVb); Mix((ulong)imageVb); Mix((ulong)xformBg.Ptr);
+			foreach (var bg in gradBgs) { Mix((ulong)bg.Ptr); }
+			foreach (var bg in imgBgs) { Mix((ulong)bg.Ptr); }
+			foreach (var bg in clipBgs) { Mix((ulong)bg.Ptr); }
+			Mix((ulong)_clips.Count);
+			foreach (var cl in _clips) { Mix((cl.IsPath ? 1UL : 0UL) | ((ulong)(uint)cl.FanStart << 1) | ((ulong)(uint)cl.FanCount << 33)); }
+			return h;
+		}
+		void ReplayProgram(GpuRenderPassEncoder pass)
+		{
+			foreach (var op in _prog)
+			{
+				switch (op.Kind)
+				{
+					case 0: pass.SetScissorRect(op.A, op.B, op.C, op.D); break;
+					case 1: pass.SetStencilReference(op.A); break;
+					default: { var b = _bundles[(int)op.A].Ptr; pass.ExecuteBundles(&b, 1); break; }
+				}
+			}
+		}
+		void FastDraw(GpuRenderPassEncoder pass)
+		{
+			if (!_bundleEnabled) { DrawScene(pass, 0, _cmds.Count); return; }
+			ulong hh = HashScene();
+			if (!_progValid || hh != _progHash)
+			{
+				foreach (var b in _bundles) { b.Dispose(); }
+				_bundles.Clear(); _prog.Clear();
+				bundleRec = true; DrawScene(default, 0, _cmds.Count); FlushRec(); bundleRec = false;
+				_progHash = hh; _progValid = true;
+			}
+			ReplayProgram(pass);
 		}
 
 		long tSetup = perf ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
 
 		byte[] result = _backdrops.Count == 0 && _shadows.Count == 0 && _layers.Count == 0 && _masks.Count == 0
-			? ctx.RenderToRgba(_w, _h, clearColor, pass => DrawScene(pass, 0, _cmds.Count), depthFormat: TextureFormat.Depth24PlusStencil8, sampleCount: msaa, cache: cache, readback: readback)
-			: RenderSegmented(ctx, clearColor, sampler, DrawScene, clipStack, pathVb, pathCount, coverVb, coverCount, stencilPipeline, pathDynVb, pathDynCount, coverDynVb, coverDynCount, cache, readback);
+			? ctx.RenderToRgba(_w, _h, clearColor, FastDraw, depthFormat: TextureFormat.Depth24PlusStencil8, sampleCount: msaa, cache: cache, readback: readback)
+			: RenderSegmented(ctx, clearColor, sampler, DrawScene, clipStack, pathVb, pathCount, coverVb, coverCount, stencilPipeline, pathDynVb, pathDynCount, coverDynVb, coverDynCount, xformBg, cache, readback);
 
 		if (perf)
 		{
@@ -1472,7 +1636,7 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 	private byte[] RenderSegmented(WebGpuContext ctx, Silk.NET.WebGPU.Color clearColor, GpuSampler sampler,
 		Action<GpuRenderPassEncoder, int, int> drawScene, List<int> clipStack,
 		Buffer* pathVb, int pathVertsCount, Buffer* coverVb, int coverVertsCount, GpuRenderPipeline stencilPipeline,
-		Buffer* pathDynVb, int pathDynCount, Buffer* coverDynVb, int coverDynCount,
+		Buffer* pathDynVb, int pathDynCount, Buffer* coverDynVb, int coverDynCount, GpuBindGroup xformBg,
 		WebGpuTargets? cache = null, bool readback = true)
 	{
 		bool perf = Environment.GetEnvironmentVariable("UNO_RENDER_PERF") == "1";
@@ -1507,7 +1671,9 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 				pcache.AddPipe("backdrop", ctx.CreateRenderPipeline("backdrop", m, vertexLayouts: [], bindGroupLayouts: bgl, blend: SrcOver, sampleCount: S));
 			using (var m = ctx.CreateShaderModuleWgsl("coverbackdrop", CoverBackdropWgsl))
 				pcache.AddPipe("coverbackdrop", ctx.CreateRenderPipeline("coverbackdrop", m,
-					vertexLayouts: [new VLayout(24, [new(VertexFormat.Float32x2, 0, 0)])], bindGroupLayouts: bgl,
+					// Cover verts carry a trailing tf index in arena mode (28B) vs 24B plain; the shader reads only
+					// pos (offset 0), but the stride MUST match the emitted layout or every vertex after the first misreads.
+					vertexLayouts: [new VLayout(_arenaEnabled ? 28ul : 24ul, [new(VertexFormat.Float32x2, 0, 0)])], bindGroupLayouts: bgl,
 					blend: SrcOver, depthStencil: StencilState(StencilOperation.Zero, CompareFunction.NotEqual), sampleCount: S));
 			using (var m = ctx.CreateShaderModuleWgsl("shadow", ShadowWgsl))
 				pcache.AddPipe("shadow", ctx.CreateRenderPipeline("shadow", m, vertexLayouts: [], bindGroupLayouts: bgl, blend: SrcOver, sampleCount: S));
@@ -1768,7 +1934,9 @@ internal sealed unsafe class WebGpuDrawList : IWebGpuDrawList
 						var wp = new GpuRenderPassEncoder(wgpu, pp);
 						wp.SetScissorRect(bcmd.Sx, bcmd.Sy, bcmd.Sw, bcmd.Sh);
 						wp.SetStencilReference(0);
-						wp.SetPipeline(stencilPipeline); wp.SetVertexBuffer(0, pathDynVb, 0, (ulong)(pathDynCount * 4)); wp.Draw((uint)bd.FanCount, 1, (uint)bd.FanStart, 0);
+						// Arena pstencil requires the transform table at group 0 (verts are local + a per-vertex tf index) —
+						// every other pstencil draw binds it; this path-masked-backdrop stencil is the one that didn't.
+						wp.SetPipeline(stencilPipeline); if (_arenaEnabled) { wp.SetBindGroup(0, xformBg, 0, null); } wp.SetVertexBuffer(0, pathDynVb, 0, (ulong)(pathDynCount * 4)); wp.Draw((uint)bd.FanCount, 1, (uint)bd.FanStart, 0);
 						wp.SetPipeline(coverBackPipe); wp.SetBindGroup(0, cbg, 0, null); wp.SetVertexBuffer(0, coverDynVb, 0, (ulong)(coverDynCount * 4)); wp.Draw(6, 1, (uint)bd.CoverStart, 0);
 						EndPass(pp);
 					}
