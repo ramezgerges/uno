@@ -2579,6 +2579,9 @@
 
 		  <!-- WindowActivatedEventArgs.WindowActivationState retyped from the Uno-only Windows.UI.Core.CoreWindowActivationState to the WinUI Microsoft.UI.Xaml.WindowActivationState; the old-typed property reads as removed (getter accessor paired in <Methods> below). -->
 		  <Member fullName="Windows.UI.Core.CoreWindowActivationState Microsoft.UI.Xaml.WindowActivatedEventArgs::WindowActivationState()" reason="Retyped WindowActivationState to Microsoft.UI.Xaml.WindowActivationState (BC13, breaking changes for 7.0)" />
+		  <!-- FrameworkElement.Background removed: declared per-type to match WinUI (BC38, breaking changes for 7.0). -->
+		  <Member fullName="Microsoft.UI.Xaml.Media.Brush Microsoft.UI.Xaml.FrameworkElement::Background()" reason="WinUI sync (BC38): Background declared per-type, not on FrameworkElement" />
+		  <Member fullName="Microsoft.UI.Xaml.DependencyProperty Microsoft.UI.Xaml.FrameworkElement::BackgroundProperty()" reason="WinUI sync (BC38): BackgroundProperty declared per-type, not on FrameworkElement" />
 	  </Properties>
 	  <Methods>
 		  <!-- StackLayout.DisableVirtualizationProperty DP getter: paired with the removed property (see <Properties> above). DisableVirtualization is a plain CLR property in WinUI. -->
@@ -3035,6 +3038,18 @@
 
 		  <!-- WindowActivatedEventArgs.WindowActivationState getter accessor retyped from the Uno-only Windows.UI.Core.CoreWindowActivationState to the WinUI Microsoft.UI.Xaml.WindowActivationState; the old-typed getter reads as removed (property paired in <Properties> above). -->
 		  <Member fullName="Windows.UI.Core.CoreWindowActivationState Microsoft.UI.Xaml.WindowActivatedEventArgs.get_WindowActivationState()" reason="Retyped WindowActivationState to Microsoft.UI.Xaml.WindowActivationState (BC13, breaking changes for 7.0)" />
+		  <!-- FrameworkElement.Background accessors + OnBackgroundChanged relocated to the declaring types (BC38, breaking changes for 7.0). -->
+		  <Member fullName="Microsoft.UI.Xaml.Media.Brush Microsoft.UI.Xaml.FrameworkElement.get_Background()" reason="WinUI sync (BC38): Background declared per-type, not on FrameworkElement" />
+		  <Member fullName="System.Void Microsoft.UI.Xaml.FrameworkElement.set_Background(Microsoft.UI.Xaml.Media.Brush value)" reason="WinUI sync (BC38): Background declared per-type, not on FrameworkElement" />
+		  <Member fullName="Microsoft.UI.Xaml.DependencyProperty Microsoft.UI.Xaml.FrameworkElement.get_BackgroundProperty()" reason="WinUI sync (BC38): BackgroundProperty declared per-type, not on FrameworkElement" />
+		  <Member fullName="System.Void Microsoft.UI.Xaml.FrameworkElement.OnBackgroundChanged(Microsoft.UI.Xaml.DependencyPropertyChangedEventArgs e)" reason="WinUI sync (BC38): OnBackgroundChanged moved to the declaring types" />
+		  <Member fullName="System.Void Microsoft.UI.Xaml.Shapes.Shape.OnBackgroundChanged(Microsoft.UI.Xaml.DependencyPropertyChangedEventArgs e)" reason="WinUI sync (BC38): Shape has no Background in WinUI (uses Fill)" />
+		  <Member fullName="System.Void Microsoft.UI.Xaml.Controls.Control.OnBackgroundChanged(Microsoft.UI.Xaml.DependencyPropertyChangedEventArgs e)" reason="WinUI sync (BC38): OnBackgroundChanged is Uno-only plumbing, narrowed to private protected" />
+		  <Member fullName="System.Void Microsoft.UI.Xaml.Controls.Panel.OnBackgroundChanged(Microsoft.UI.Xaml.DependencyPropertyChangedEventArgs e)" reason="WinUI sync (BC38): OnBackgroundChanged is Uno-only plumbing, narrowed to private protected" />
+		  <Member fullName="System.Void Microsoft.UI.Xaml.Controls.Border.OnBackgroundChanged(Microsoft.UI.Xaml.DependencyPropertyChangedEventArgs e)" reason="WinUI sync (BC38): OnBackgroundChanged is Uno-only plumbing, narrowed to private protected" />
+		  <Member fullName="System.Void Microsoft.UI.Xaml.Controls.ContentPresenter.OnBackgroundChanged(Microsoft.UI.Xaml.DependencyPropertyChangedEventArgs e)" reason="WinUI sync (BC38): OnBackgroundChanged is Uno-only plumbing, narrowed to private protected" />
+		  <Member fullName="System.Void Microsoft.UI.Xaml.Controls.Page.OnBackgroundChanged(Microsoft.UI.Xaml.DependencyPropertyChangedEventArgs e)" reason="WinUI sync (BC38): OnBackgroundChanged is Uno-only plumbing, narrowed to private protected" />
+		  <Member fullName="System.Void Microsoft.UI.Xaml.Controls.CalendarViewBaseItem.OnBackgroundChanged(Microsoft.UI.Xaml.DependencyPropertyChangedEventArgs e)" reason="WinUI sync (BC38): OnBackgroundChanged is Uno-only plumbing, narrowed to private protected" />
 	  </Methods>
 	  <Events>
 		  <!-- ==== Relocated from the retired 6.5 set when the diff base advanced to 6.6.166: still breaking against 6.6.x (none of these removals shipped in a 6.6 stable). ==== -->
