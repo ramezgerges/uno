@@ -45,6 +45,20 @@ internal interface IWebGpuDrawList
 	void AddRoundedRect(Matrix4x4 totalMatrix, Vector2 localOffset, Vector2 size, Vector4 radii, Color color, float opacity, Vector4 clipRect);
 
 	/// <summary>
+	/// Analytic rectangular border/ring: fills the annulus between an outer rounded rect and an inner one (both in
+	/// local space), replacing an even-odd stencil-fan ring. Handles rounded corners and off-centre (asymmetric) insets.
+	/// </summary>
+	void AddBorder(Matrix4x4 totalMatrix, Vector2 outerOffset, Vector2 outerSize, Vector4 outerRadii, Vector2 innerOffset, Vector2 innerSize, Vector4 innerRadii, Color color, float opacity, Vector4 clipRect);
+
+	/// <summary>
+	/// A single glyph. With the glyph atlas enabled it draws as a textured quad sampling the glyph's cached coverage
+	/// tile; otherwise it falls back to an even-odd stencil fan over <paramref name="fallbackContours"/> (the glyph-local
+	/// outline). <paramref name="pen"/> is the glyph origin in local space. <paramref name="font"/> is a SkiaSharp SKFont
+	/// (typed as object to keep SkiaSharp out of this shared interface — the Skia backend casts it).
+	/// </summary>
+	void AddGlyph(object font, ushort glyphId, Matrix4x4 totalMatrix, Vector2 pen, Color color, Vector4 clipRect, Vector2[][] fallbackContours);
+
+	/// <summary>
 	/// A solid-filled arbitrary path: <paramref name="contours"/> are closed polylines in local
 	/// coordinates (Béziers already flattened by the caller via Skia geometry — no Skia drawing),
 	/// filled even-odd by WebGPU stencil-then-cover. Placed by <paramref name="totalMatrix"/>.

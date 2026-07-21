@@ -84,6 +84,43 @@ namespace Microsoft.UI.Composition
 		// WebGPU counterpart of Paint: it MUST mirror the Skia stroke/fill geometry generation exactly (dashes, trim,
 		// caps, miter-clip joins, background-colour transition) — the only difference is that the resulting SKPath is
 		// flattened and handed to the GPU draw list instead of being clipped+painted onto an SKCanvas.
+		// True when the contour is an axis-aligned rectangle (every vertex sits on the bbox edges), returning its bounds.
+		private static bool TryAxisRect(System.Numerics.Vector2[] c, out (float L, float T, float R, float B) rect)
+		{
+			float l = float.MaxValue, t = float.MaxValue, r = float.MinValue, b = float.MinValue;
+			foreach (var p in c) { if (p.X < l) { l = p.X; } if (p.X > r) { r = p.X; } if (p.Y < t) { t = p.Y; } if (p.Y > b) { b = p.Y; } }
+			rect = (l, t, r, b);
+			const float e = 0.01f;
+			if (r - l < e || b - t < e) { return false; }
+			foreach (var p in c)
+			{
+				bool onX = MathF.Abs(p.X - l) < e || MathF.Abs(p.X - r) < e;
+				bool onY = MathF.Abs(p.Y - t) < e || MathF.Abs(p.Y - b) < e;
+				if (!(onX && onY)) { return false; }
+			}
+			return true;
+		}
+
+		// True when the two contours are nested axis-aligned rectangles (a border ring): the even-odd fill is the
+		// annulus between <paramref name="outer"/> and <paramref name="inner"/>.
+		private static bool TryGetRectRing(System.Numerics.Vector2[][] contours, out (float L, float T, float R, float B) outer, out (float L, float T, float R, float B) inner)
+		{
+			outer = default; inner = default;
+			if (contours.Length != 2) { return false; }
+			if (!TryAxisRect(contours[0], out var a) || !TryAxisRect(contours[1], out var b)) { return false; }
+			bool aOuter = (a.R - a.L) * (a.B - a.T) >= (b.R - b.L) * (b.B - b.T);
+			outer = aOuter ? a : b;
+			inner = aOuter ? b : a;
+			const float e = 0.01f;
+			// inner contained in outer (nested ⇒ a real annulus; equal ⇒ a degenerate/zero-thickness border that
+			// the even-odd fill renders as nothing — the caller skips those).
+			return inner.L >= outer.L - e && inner.T >= outer.T - e && inner.R <= outer.R + e && inner.B <= outer.B + e;
+		}
+
+		// A ring whose inner rect nearly equals the outer (zero/sub-pixel border) fills nothing under even-odd.
+		private static bool IsDegenerateRing(in (float L, float T, float R, float B) outer, in (float L, float T, float R, float B) inner)
+			=> (inner.R - inner.L) >= (outer.R - outer.L) - 0.5f && (inner.B - inner.T) >= (outer.B - outer.T) - 0.5f;
+
 		internal override void PaintWebGpu(IWebGpuDrawList draw, System.Numerics.Matrix4x4 baseMatrix, System.Numerics.Vector4 clip, float opacity)
 		{
 			if (_geometryWithTransformations is not { } geometryWithTransformations)
@@ -107,17 +144,59 @@ namespace Microsoft.UI.Composition
 				fillPath.Rewind();
 				finalFillGeometryWithTransformations.GetFillPath(fillPaint, fillPath);
 
-				var contours = WebGpuBrushPainter.FlattenPath(fillPath);
-				if (contours.Length > 0)
+				// Fast-path: an axis-aligned rectangle fill (backgrounds, cards, full-screen rects) is a single
+				// analytic quad via FillRect — no stencil-then-cover. The general path rasterises a full-area stencil
+				// fan + cover per rect, which dominated GPU time; a plain rect never needs that. Rotated/skewed
+				// transforms (analytic AA assumes axis-aligned) and non-rect geometry keep the stencil path.
+				bool noTrim = Geometry is null || (Geometry.TrimStart == default && Geometry.TrimEnd == default);
+				if (noTrim && MathF.Abs(m.M12) < 1e-4f && MathF.Abs(m.M21) < 1e-4f && fillPath.IsRect)
 				{
+					var fr = fillPath.Bounds;
+					var rectOffset = new System.Numerics.Vector2(fr.Left, fr.Top);
+					var rectSize = new System.Numerics.Vector2(fr.Width, fr.Height);
 					// A theme/brush transition supplies a transient fill colour that overrides the brush (matches Skia).
-					if (Compositor.TryGetEffectiveBackgroundColor(this, out var colorFromTransition))
+					if (Compositor.TryGetEffectiveBackgroundColor(this, out var rectColor))
 					{
-						draw.AddPath(m, contours, colorFromTransition, opacity, clip);
+						draw.AddRoundedRect(m, rectOffset, rectSize, default, rectColor, opacity, clip);
 					}
 					else
 					{
-						WebGpuBrushPainter.FillPath(draw, fill, m, contours, opacity, clip);
+						WebGpuBrushPainter.FillRect(draw, fill, m, rectOffset, rectSize, default, opacity, clip);
+					}
+				}
+				else
+				{
+					var contours = WebGpuBrushPainter.FlattenPath(fillPath);
+					if (contours.Length > 0)
+					{
+						// A theme/brush transition supplies a transient fill colour that overrides the brush (matches Skia).
+						bool hasTransition = Compositor.TryGetEffectiveBackgroundColor(this, out var fillColor);
+						// Fast-path: an axis-aligned rectangular BORDER ring (two nested rect contours, filled even-odd)
+						// becomes four analytic rect bars instead of a stencil fan — the fan rasterises the hole too, so a
+						// full-screen frame costs 2-3× a full-screen fill. Solid colour only; rounded/rotated/gradient
+						// borders keep the general stencil path.
+						if (MathF.Abs(m.M12) < 1e-4f && MathF.Abs(m.M21) < 1e-4f
+							&& TryGetRectRing(contours, out var outer, out var inner)
+							&& (hasTransition || WebGpuBrushPainter.TryGetSolidColor(fill, out fillColor)))
+						{
+							// Degenerate (zero-thickness) ring paints nothing under even-odd — skip it (it was costing a
+							// full-area stencil fan for no output). A real ring becomes one analytic annulus draw.
+							if (!IsDegenerateRing(outer, inner))
+							{
+								draw.AddBorder(m,
+									new System.Numerics.Vector2(outer.L, outer.T), new System.Numerics.Vector2(outer.R - outer.L, outer.B - outer.T), default,
+									new System.Numerics.Vector2(inner.L, inner.T), new System.Numerics.Vector2(inner.R - inner.L, inner.B - inner.T), default,
+									fillColor, opacity, clip);
+							}
+						}
+						else if (hasTransition)
+						{
+							draw.AddPath(m, contours, fillColor, opacity, clip);
+						}
+						else
+						{
+							WebGpuBrushPainter.FillPath(draw, fill, m, contours, opacity, clip);
+						}
 					}
 				}
 			}
@@ -203,7 +282,25 @@ namespace Microsoft.UI.Composition
 				var strokeContours = WebGpuBrushPainter.FlattenPath(strokeFillPath);
 				if (strokeContours.Length > 0)
 				{
-					WebGpuBrushPainter.FillPath(draw, stroke, m, strokeContours, opacity, clip);
+					// A plain rectangular stroke flattens to a two-rect ring — draw it as an analytic border (annulus)
+					// instead of an even-odd stencil fan that rasterises the hole too (2-3× overdraw on big frames).
+					// Dashed/trimmed/rounded strokes don't reduce to two axis-aligned rects, so they keep the stencil path.
+					if (MathF.Abs(m.M12) < 1e-4f && MathF.Abs(m.M21) < 1e-4f
+						&& TryGetRectRing(strokeContours, out var so, out var si)
+						&& WebGpuBrushPainter.TryGetSolidColor(stroke, out var strokeColor))
+					{
+						if (!IsDegenerateRing(so, si))
+						{
+							draw.AddBorder(m,
+								new System.Numerics.Vector2(so.L, so.T), new System.Numerics.Vector2(so.R - so.L, so.B - so.T), default,
+								new System.Numerics.Vector2(si.L, si.T), new System.Numerics.Vector2(si.R - si.L, si.B - si.T), default,
+								strokeColor, opacity, clip);
+						}
+					}
+					else
+					{
+						WebGpuBrushPainter.FillPath(draw, stroke, m, strokeContours, opacity, clip);
+					}
 				}
 			}
 		}

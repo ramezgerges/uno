@@ -33,6 +33,11 @@ internal class BorderVisual(Compositor compositor) : ContainerVisual(compositor)
 	// state set here but affects children
 	private RectangleClip? _childClipCausedByCornerRadius;
 
+	// Analytic WebGPU geometry (local space), refreshed by UpdatePathsAndCornerClip. Lets PaintWebGpu draw the
+	// rounded background + border ring as analytic quads (AddRoundedRect/AddBorder) instead of stencil-fan paths.
+	private Vector2 _wgBgOffset, _wgBgSize, _wgInnerOffset, _wgInnerSize, _wgOuterSize;
+	private Vector4 _wgBgRadii, _wgOuterRadii, _wgInnerRadii;
+
 	// We do this instead of a direct SetProperty call so that SetProperty automatically gets an accurate propertyName
 	// we need the SetProperty calls to get notified on brush updates.
 	// (<Border|Background>Brush internals change -> <Border|Background>Shape is notified through FillBrush -> render invalidation)
@@ -155,9 +160,19 @@ internal class BorderVisual(Compositor compositor) : ContainerVisual(compositor)
 
 		UpdatePathsAndCornerClip();
 
-		if (_backgroundShape is { } backgroundShape)
+		if (_backgroundBrush is { } backgroundBrush)
 		{
-			backgroundShape.PaintWebGpu(draw, TotalMatrix, ToClip(clipInRoot), opacity);
+			// Analytic rounded-rect background (one quad) instead of a stencil-fan path fill. Honour a theme/brush
+			// transition colour (as CompositionSpriteShape does) by drawing that colour analytically.
+			var clip = ToClip(clipInRoot);
+			if (_backgroundShape is { } bgShape && Compositor.TryGetEffectiveBackgroundColor(bgShape, out var transColor))
+			{
+				draw.AddRoundedRect(TotalMatrix, _wgBgOffset, _wgBgSize, _wgBgRadii, transColor, opacity, clip);
+			}
+			else
+			{
+				WebGpuBrushPainter.FillRect(draw, backgroundBrush, TotalMatrix, _wgBgOffset, _wgBgSize, _wgBgRadii, opacity, clip);
+			}
 		}
 	}
 
@@ -172,9 +187,18 @@ internal class BorderVisual(Compositor compositor) : ContainerVisual(compositor)
 
 		UpdatePathsAndCornerClip();
 
-		if (_borderShape is { } borderShape)
+		if (_borderBrush is { } borderBrush)
 		{
-			borderShape.PaintWebGpu(draw, TotalMatrix, ToClip(clipInRoot), opacity);
+			var clip = ToClip(clipInRoot);
+			// Analytic annulus (one quad) for a solid border; a gradient/image border keeps the stencil-fan ring path.
+			if (WebGpuBrushPainter.TryGetSolidColor(borderBrush, out var borderColor))
+			{
+				draw.AddBorder(TotalMatrix, Vector2.Zero, _wgOuterSize, _wgOuterRadii, _wgInnerOffset, _wgInnerSize, _wgInnerRadii, borderColor, opacity, clip);
+			}
+			else if (_borderShape is { } borderShape)
+			{
+				borderShape.PaintWebGpu(draw, TotalMatrix, clip, opacity);
+			}
 		}
 	}
 
@@ -271,6 +295,18 @@ internal class BorderVisual(Compositor compositor) : ContainerVisual(compositor)
 			var innerRadii = stackalloc SKPoint[4];
 			fullCornerRadius.Outer.GetRadii(outerRadii);
 			fullCornerRadius.Inner.GetRadii(innerRadii);
+
+			// Cache analytic geometry for PaintWebGpu (radii order: TL,TR,BR,BL; X component — elliptical X≠Y approximated).
+			var outerRadiiV = new Vector4(outerRadii[0].X, outerRadii[1].X, outerRadii[2].X, outerRadii[3].X);
+			var innerRadiiV = new Vector4(innerRadii[0].X, innerRadii[1].X, innerRadii[2].X, innerRadii[3].X);
+			_wgOuterSize = new Vector2(outerArea.Width, outerArea.Height);
+			_wgOuterRadii = outerRadiiV;
+			_wgInnerOffset = new Vector2((float)_borderThickness.Left, (float)_borderThickness.Top);
+			_wgInnerSize = new Vector2(innerArea.Width, innerArea.Height);
+			_wgInnerRadii = innerRadiiV;
+			_wgBgOffset = _useInnerBorderBoundsAsAreaForBackground ? _wgInnerOffset : Vector2.Zero;
+			_wgBgSize = _useInnerBorderBoundsAsAreaForBackground ? _wgInnerSize : _wgOuterSize;
+			_wgBgRadii = _useInnerBorderBoundsAsAreaForBackground ? innerRadiiV : outerRadiiV;
 
 			if (!_backgroundPathValid)
 			{

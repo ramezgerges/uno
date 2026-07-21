@@ -854,8 +854,12 @@ internal readonly struct ParsedText : IParsedText
 
 					using var path = fontInfo.SKFont.GetGlyphPath(gi.GlyphId);
 					if (path is null || path.IsEmpty) { continue; }
-					var contours = FlattenGlyph(path, originX, originY);
-					if (contours.Length > 0) { draw.AddPath(matrix, contours, color, opacity, clip); }
+					var contours = FlattenGlyph(path, 0, 0);
+					if (contours.Length > 0)
+					{
+						var gc = opacity >= 1f ? color : global::Windows.UI.Color.FromArgb((byte)(color.A * opacity), color.R, color.G, color.B);
+						draw.AddGlyph(fontInfo.SKFont, (ushort)gi.GlyphId, matrix, new global::System.Numerics.Vector2(originX, originY), gc, clip, contours);
+					}
 				}
 			}
 		}

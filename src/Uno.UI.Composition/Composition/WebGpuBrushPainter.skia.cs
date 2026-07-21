@@ -432,6 +432,14 @@ internal static class WebGpuBrushPainter
 		return brush;
 	}
 
+	/// <summary>True (with the brush colour) when the brush resolves to a plain solid colour.</summary>
+	internal static bool TryGetSolidColor(CompositionBrush? brush, out Color color)
+	{
+		if (Unwrap(brush) is CompositionColorBrush c) { color = c.Color; return true; }
+		color = default;
+		return false;
+	}
+
 	private static Color ToColor(SKColor c) => Color.FromArgb(c.Alpha, c.Red, c.Green, c.Blue);
 
 	/// <summary>Applies a 4×5 (row-major) color matrix to a color (unpremultiplied, 0..1), clamped.</summary>

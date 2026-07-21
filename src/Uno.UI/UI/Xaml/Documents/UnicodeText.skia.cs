@@ -920,7 +920,7 @@ internal readonly partial struct UnicodeText : IParsedText
 							}
 							if (glyphContours is { Length: > 0 })
 							{
-								draw.AddPath(matrix, glyphContours, color, 1f, clip, new global::System.Numerics.Vector2(gx, gy));
+								draw.AddGlyph(fontDetails.SKFont, (ushort)glyph.Codepoint, matrix, new global::System.Numerics.Vector2(gx, gy), color, clip, glyphContours);
 							}
 						}
 					positionAcc.X += AdvanceToPixels(glyph.GlyphPosition.XAdvance, fontDetails);

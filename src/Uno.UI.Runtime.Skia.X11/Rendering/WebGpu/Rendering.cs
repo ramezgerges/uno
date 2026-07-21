@@ -638,6 +638,9 @@ public sealed unsafe class WebGpuTargets : IDisposable
         }
         if (!fresh && _vbLen.TryGetValue(key, out var prevLen) && prevLen == data.Length)
         {
+            // Nothing dirtied this buffer this frame (e.g. after routing borders to analytic quads, the path slab
+            // may be unchanged) — the persistent buffer already holds the correct data, so skip the upload.
+            if (ranges.Count == 0) { return buf.Ptr; }
             // Coalesce nearby dirty ranges into fewer, larger WriteBuffers. Each QueueWriteBuffer can stall on
             // wgpu's staging belt (a full segment waits for the GPU, which is a frame behind on an iGPU), so many
             // small writes cost far more than a few bigger ones. Neighbouring slab slices are usually contiguous, so
