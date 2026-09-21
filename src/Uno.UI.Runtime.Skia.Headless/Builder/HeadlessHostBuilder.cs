@@ -1,4 +1,4 @@
-#nullable enable
+﻿#nullable enable
 
 using System;
 using Windows.Graphics.Display;
@@ -75,6 +75,26 @@ public class HeadlessHostBuilder : IPlatformHostBuilder
 	}
 
 	/// <summary>
+	/// Makes windows render real pixels, drawn on demand through <paramref name="frames"/>. The caller
+	/// owns the cadence: Uno signals that it wants to be drawn, and the frame is produced when asked.
+	/// </summary>
+	public HeadlessHostBuilder WithFrames(HeadlessFrameSource frames)
+	{
+		Frames = frames ?? throw new ArgumentNullException(nameof(frames));
+		return this;
+	}
+
+	/// <summary>
+	/// Gives windows pointer and keyboard input sources driven by <paramref name="input"/>, so an
+	/// external source can inject events into the app.
+	/// </summary>
+	public HeadlessHostBuilder WithInput(HeadlessInput input)
+	{
+		Input = input ?? throw new ArgumentNullException(nameof(input));
+		return this;
+	}
+
+	/// <summary>
 	/// Supplies per-window configuration. The <paramref name="configurator"/> is invoked for each
 	/// window as it is created (see <see cref="HeadlessWindowContext.Index"/> to distinguish them) and
 	/// returns that window's <see cref="HeadlessWindowOptions"/>. When set, it takes precedence over the
@@ -101,6 +121,8 @@ public class HeadlessHostBuilder : IPlatformHostBuilder
 		return new HeadlessWindowOptions
 		{
 			Scale = Scale,
+			Frames = Frames,
+			Input = Input,
 		};
 	}
 
@@ -109,4 +131,8 @@ public class HeadlessHostBuilder : IPlatformHostBuilder
 	internal int Height { get; private set; } = NativeWindowWrapperBase.InitialHeight;
 
 	internal float Scale { get; private set; } = 1f;
+
+	internal HeadlessFrameSource? Frames { get; private set; }
+
+	internal HeadlessInput? Input { get; private set; }
 }

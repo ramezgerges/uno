@@ -1,10 +1,11 @@
-#nullable enable
+﻿#nullable enable
 
 using System;
 using Windows.Foundation;
 using Windows.Graphics;
 using Windows.Graphics.Display;
 using Microsoft.UI.Xaml;
+using Uno.UI;
 using Uno.UI.Hosting;
 using Uno.UI.Runtime.Skia;
 using Uno.UI.Runtime.Skia.Headless;
@@ -20,6 +21,11 @@ namespace Uno.WinUI.Runtime.Skia.Headless.UI;
 /// </summary>
 internal sealed class HeadlessWindowWrapper : NativeWindowWrapperBase, IXamlRootHost, IDisplayInformationExtension
 {
+	// Field initialisers run before the base constructor, which is where the framework resolves the
+	// input sources through ApiExtensibility. Creating these any later hands it throwaway instances.
+	private readonly HeadlessPointerInputSource _pointerSource = new();
+	private readonly HeadlessKeyboardInputSource _keyboardSource = new();
+
 	private readonly float _scale;
 	private readonly HeadlessRenderer _renderer;
 	private int _rawWidth;
@@ -44,11 +50,25 @@ internal sealed class HeadlessWindowWrapper : NativeWindowWrapperBase, IXamlRoot
 
 		// Create the renderer before publishing bounds: setting bounds can synchronously route an
 		// InvalidateRender back through this wrapper (as IXamlRootHost), which needs a live renderer.
-		_renderer = new HeadlessRenderer(this);
+		// The host skips the paint walk globally since headless windows normally produce no pixels;
+		// a window that renders real frames needs it back on.
+		if (options.Frames is not null)
+		{
+			FeatureConfiguration.Rendering.SkipVisualTreePainting = false;
+		}
+
+		_renderer = new HeadlessRenderer(this, options.Frames);
+
+		options.Input?.Connect(_pointerSource, _keyboardSource, this);
 
 		// The XamlRoot is already associated (base ctor), so bounds can be published synchronously.
 		ApplySize();
+
 	}
+
+	internal HeadlessPointerInputSource PointerSource => _pointerSource;
+
+	internal HeadlessKeyboardInputSource KeyboardSource => _keyboardSource;
 
 	public override object? NativeWindow => null;
 

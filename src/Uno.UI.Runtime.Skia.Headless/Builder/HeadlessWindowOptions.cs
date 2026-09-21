@@ -1,4 +1,4 @@
-#nullable enable
+﻿#nullable enable
 
 namespace Uno.UI.Runtime.Skia;
 
@@ -15,4 +15,16 @@ public sealed class HeadlessWindowOptions
 	/// <c>size / scale</c>. Defaults to <c>1.0</c>.
 	/// </summary>
 	public float Scale { get; init; } = 1f;
+
+	/// <summary>
+	/// Renders this window on demand. When null the window renders to a null surface and produces no
+	/// pixels.
+	/// </summary>
+	public HeadlessFrameSource? Frames { get; init; }
+
+	/// <summary>
+	/// Receives external pointer and keyboard input for this window. When null the window has no
+	/// input sources and nothing can be injected into it.
+	/// </summary>
+	public HeadlessInput? Input { get; init; }
 }

@@ -1,4 +1,4 @@
-#nullable enable
+﻿#nullable enable
 
 using System;
 using System.Threading;
@@ -85,6 +85,17 @@ public class HeadlessHost : SkiaHost, ISkiaApplicationHost, IDisposable
 		ApiExtensibility.Register(typeof(INativeWindowFactoryExtension), o => _windowFactory);
 		ApiExtensibility.Register(typeof(Uno.ApplicationModel.Core.ICoreApplicationExtension), o => _coreApplicationExtension);
 		ApiExtensibility.Register<DisplayInformation>(typeof(IDisplayInformationExtension), ResolveDisplayInformation);
+
+		// Resolved per window: the factory receives the IXamlRootHost, which is the window wrapper
+		// owning that window's sources. A window configured without input gets inert sources, so the
+		// framework still has something to subscribe to.
+		ApiExtensibility.Register<IXamlRootHost>(
+			typeof(Windows.UI.Core.IUnoCorePointerInputSource),
+			o => (o as HeadlessWindowWrapper)?.PointerSource ?? new HeadlessPointerInputSource());
+
+		ApiExtensibility.Register<IXamlRootHost>(
+			typeof(Windows.UI.Core.IUnoKeyboardInputSource),
+			o => (o as HeadlessWindowWrapper)?.KeyboardSource ?? new HeadlessKeyboardInputSource());
 
 		void Dispatch(System.Action d, NativeDispatcherPriority p)
 			=> _eventLoop.Schedule(d);

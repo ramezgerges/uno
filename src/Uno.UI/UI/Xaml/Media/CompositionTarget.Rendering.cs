@@ -1,4 +1,4 @@
-#nullable enable
+﻿#nullable enable
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -223,6 +223,15 @@ public partial class CompositionTarget
 	// is written but never replayed and accumulates as stale artifacts. Outsetting the clip by one
 	// device pixel covers every pixel the damaged content may have touched; the replayed picture is
 	// the full frame, so over-covering is always correct.
+	/// <summary>
+	/// The region the last <see cref="Draw"/> actually touched, in raw pixels, or <see langword="null"/>
+	/// when the whole frame was repainted. Lets a host copy or transmit only what changed. Valid until
+	/// the next draw.
+	/// </summary>
+	internal SKPath? LastPresentedDamage { get; private set; }
+
+	private readonly SKPath _presentedDamage = new();
+
 	private SKPath OutsetDamageForPresent(SKPath damage, float rasterizationScale)
 	{
 		if (damage.IsEmpty)
@@ -319,7 +328,19 @@ public partial class CompositionTarget
 
 			if (useDamageRegion && !overlayEnabled)
 			{
-				canvas.ClipPath(OutsetDamageForPresent(damage, rasterizationScale), antialias: false);
+				var presentDamage = OutsetDamageForPresent(damage, rasterizationScale);
+				canvas.ClipPath(presentDamage, antialias: false);
+
+				// Reported in raw pixels: the clip runs after the canvas is scaled, so the path itself is
+				// in logical coordinates and hosts would otherwise all have to undo that.
+				_presentedDamage.Reset();
+				presentDamage.Transform(SKMatrix.CreateScale(rasterizationScale, rasterizationScale), _presentedDamage);
+				LastPresentedDamage = _presentedDamage;
+			}
+			else
+			{
+				// The whole frame was repainted, so there is no smaller region to report.
+				LastPresentedDamage = null;
 			}
 
 			using var fpsHelperDisposable = _fpsHelper.BeginFrame();
