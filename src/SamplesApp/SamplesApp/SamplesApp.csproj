@@ -1,4 +1,4 @@
-<Project>
+﻿<Project>
 	<!--
 	Uno.Sdk is imported by path rather than via Sdk="Uno.Sdk.Private": an Sdk attribute resolves through
 	NuGet at evaluation time, so a fresh clone could not load this project until the SDK had been packed.
@@ -134,6 +134,7 @@
 		<ProjectReference Include="..\..\Uno.UI.Runtime.Skia.X11\Uno.UI.Runtime.Skia.X11.csproj" />
 		<ProjectReference Include="..\..\Uno.UI.Runtime.Skia.Linux.FrameBuffer\Uno.UI.Runtime.Skia.Linux.FrameBuffer.csproj" />
 		<ProjectReference Include="..\..\Uno.UI.Runtime.Skia.MacOS\Uno.UI.Runtime.Skia.MacOS.csproj" />
+		<ProjectReference Include="..\..\Uno.UI.Runtime.Skia.Headless\Uno.UI.Runtime.Skia.Headless.csproj" />
 		<ProjectReference Include="..\..\AddIns\Uno.UI.MediaPlayer.Skia.Win32\Uno.UI.MediaPlayer.Skia.Win32.csproj" />
 		<ProjectReference Include="..\..\AddIns\Uno.UI.MediaPlayer.Skia.X11\Uno.UI.MediaPlayer.Skia.X11.csproj" />
 		<ProjectReference Include="..\..\AddIns\Uno.UI.WebView.Skia.X11\Uno.UI.WebView.Skia.X11.csproj" />
@@ -237,6 +238,8 @@
 		<WasmBuildNative>true</WasmBuildNative>
 		<!-- Workaround for https://github.com/dotnet/aspnetcore/issues/63970 -->
 		<WasmFingerprintAssets>false</WasmFingerprintAssets>
+		<!-- Workaround for Bootstrapper DotnetJs Fingerprinting issue -->
+		<WasmShellEnableDotnetJsFingerprinting>false</WasmShellEnableDotnetJsFingerprinting>
 		<!--
 		This wwwroot is mounted at two roots: the runtime tests serve it at localhost:8000/ and PR
 		staging from /pr-<N>/wasm-skia-net9/. Uno.Sdk defaults this to "/" for deep-link routing, which
