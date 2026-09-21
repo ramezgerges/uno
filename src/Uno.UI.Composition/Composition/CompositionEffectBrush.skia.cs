@@ -30,7 +30,26 @@ public partial class CompositionEffectBrush : CompositionBrush
 		private set => SetProperty(ref _hasBackdropBrushInput, value);
 	}
 
-	internal override bool RequiresRepaintOnEveryFrame => HasBackdropBrushInput;
+	/// <summary>
+	/// True when a bound source paints live content, e.g. a CompositionVisualSurface tracking a visual tree.
+	/// </summary>
+	private bool HasLiveSourceParameter
+	{
+		get
+		{
+			foreach (var source in _sourceParameters.Values)
+			{
+				if (source.RequiresRepaintOnEveryFrame)
+				{
+					return true;
+				}
+			}
+
+			return false;
+		}
+	}
+
+	internal override bool RequiresRepaintOnEveryFrame => HasBackdropBrushInput || HasLiveSourceParameter;
 
 	private float _backdropBlurSigma;
 
@@ -1484,7 +1503,9 @@ $$"""
 							srcBounds = bounds with { Right = size.X, Bottom = size.Y };
 						}
 
-						// Creating a static SKPictureRecorder to be reused for all calls causes a segfault for some reason
+						// A fresh recorder per call: this runs during a render pass, and painting the brush
+						// below can re-enter rendering (CompositionVisualSurface), so a shared instance would
+						// have its in-progress recording torn down by the nested pass.
 						var recorder = new SKPictureRecorder();
 						brush.Paint(recorder.BeginRecording(srcBounds), 1, srcBounds);
 						return SKImageFilter.CreatePicture(recorder.EndRecording());
@@ -1613,11 +1634,14 @@ $$"""
 
 	private void UpdateFilter(SKRect bounds)
 	{
-		if (_currentBounds != bounds || _filter is null || Compositor.IsSoftwareRenderer != _currentCompMode)
+		// A live source bakes its content into the filter's picture, so the filter has to be
+		// rebuilt every frame for the effect to track it instead of freezing on the first frame.
+		if (_currentBounds != bounds || _filter is null || Compositor.IsSoftwareRenderer != _currentCompMode || HasLiveSourceParameter)
 		{
 			_isCurrentInputBackdrop = false;
 			_hasBackdropBrushInputPrivate = false;
 			_backdropBlurSigma = 0;
+			_filter?.Dispose();
 			_filter = GenerateEffectFilter(_effect, bounds) ?? throw new NotSupportedException($"Unsupported effect description.\r\nEffect name: {_effect.Name}");
 			HasBackdropBrushInput = _hasBackdropBrushInputPrivate;
 			_currentBounds = bounds;
