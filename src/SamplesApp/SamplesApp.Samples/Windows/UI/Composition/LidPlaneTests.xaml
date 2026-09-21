@@ -1,0 +1,147 @@
+﻿<UserControl
+    x:Class="UITests.Windows_UI_Composition.LidPlaneTests"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+    mc:Ignorable="d">
+
+    <ScrollViewer>
+        <StackPanel Padding="16" Spacing="12">
+
+            <TextBlock Text="Projects live content onto a plane hinged at its bottom edge, blurring and dimming towards the far edge. Drag Progress to sweep the effect." TextWrapping="Wrap" />
+
+            <Border
+                Width="480"
+                Height="300"
+                HorizontalAlignment="Left">
+                <Grid>
+                    <!--  Capture source. Hidden by setting Opacity on this parent: the surface  -->
+                    <!--  renders contentHost directly, so suppressing contentHost itself would  -->
+                    <!--  blank the capture as well.  -->
+                    <Border x:Name="sourceHost" Opacity="0">
+                        <Border
+                            x:Name="contentHost"
+                            Width="480"
+                            Height="300"
+                            Background="{ThemeResource ApplicationPageBackgroundThemeBrush}"
+                            BorderBrush="{ThemeResource SystemControlForegroundBaseMediumLowBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8">
+                            <Grid Padding="16" RowSpacing="8">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock
+                                    Grid.Row="0"
+                                    FontSize="22"
+                                    FontWeight="SemiBold"
+                                    Text="Wrapped content" />
+
+                                <TextBlock
+                                    Grid.Row="1"
+                                    Text="A live visual tree, not a static image. The ring below keeps spinning while the plane is tilted."
+                                    TextWrapping="Wrap" />
+
+                                <Grid Grid.Row="2" ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Rectangle
+                                        Grid.Column="0"
+                                        Fill="{ThemeResource SystemAccentColorLight2}"
+                                        RadiusX="4"
+                                        RadiusY="4" />
+                                    <Rectangle
+                                        Grid.Column="1"
+                                        Fill="{ThemeResource SystemAccentColorDark1}"
+                                        RadiusX="4"
+                                        RadiusY="4" />
+                                    <ProgressRing
+                                        Grid.Column="2"
+                                        Width="48"
+                                        Height="48"
+                                        IsActive="True" />
+                                </Grid>
+
+                                <Button Grid.Row="3" Content="A real button" />
+                            </Grid>
+                        </Border>
+                    </Border>
+
+                    <!--  Host for the projected sprite visual. Shares the cell, so both use the same origin.  -->
+                    <Border x:Name="effectHost" />
+                </Grid>
+            </Border>
+
+            <TextBlock FontWeight="SemiBold" Text="Progress" />
+            <Slider
+                x:Name="progressSlider"
+                Width="480"
+                HorizontalAlignment="Left"
+                Maximum="1"
+                Minimum="0"
+                StepFrequency="0.01"
+                ValueChanged="OnParameterChanged"
+                Value="0" />
+
+            <TextBlock FontWeight="SemiBold" Text="Max angle (degrees)" />
+            <Slider
+                x:Name="angleSlider"
+                Width="480"
+                HorizontalAlignment="Left"
+                Maximum="90"
+                Minimum="-90"
+                StepFrequency="1"
+                ValueChanged="OnParameterChanged"
+                Value="70" />
+
+            <TextBlock FontWeight="SemiBold" Text="Camera distance" />
+            <Slider
+                x:Name="distanceSlider"
+                Width="480"
+                HorizontalAlignment="Left"
+                Maximum="3000"
+                Minimum="200"
+                StepFrequency="10"
+                ValueChanged="OnParameterChanged"
+                Value="900" />
+
+            <TextBlock FontWeight="SemiBold" Text="Blur amount" />
+            <Slider
+                x:Name="blurSlider"
+                Width="480"
+                HorizontalAlignment="Left"
+                Maximum="40"
+                Minimum="0"
+                StepFrequency="1"
+                ValueChanged="OnParameterChanged"
+                Value="20" />
+
+            <TextBlock FontWeight="SemiBold" Text="Dim amount" />
+            <Slider
+                x:Name="dimSlider"
+                Width="480"
+                HorizontalAlignment="Left"
+                Maximum="1"
+                Minimum="0"
+                StepFrequency="0.05"
+                ValueChanged="OnParameterChanged"
+                Value="0.6" />
+
+            <CheckBox
+                x:Name="showSource"
+                Checked="OnShowSourceChanged"
+                Content="Show capture source (debug)"
+                Unchecked="OnShowSourceChanged" />
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>
