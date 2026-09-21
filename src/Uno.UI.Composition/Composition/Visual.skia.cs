@@ -44,7 +44,10 @@ public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 	private int _pictureCollapsingOptimizationFrameThreshold;
 	private int _pictureCollapsingOptimizationVisualCountThreshold;
 
-	private static SKPictureRecorder _recorder = new();
+	// Rendering re-enters itself whenever a brush paints a visual subtree (see
+	// CompositionVisualSurface), so a single shared recorder would have its in-progress
+	// recording torn down by the nested pass, leaving the outer EndRecording to fault.
+	private static readonly ObjectPool<SKPictureRecorder> _recorderPool = new(() => new SKPictureRecorder());
 
 	private CompositionClip? _clip;
 	private Vector2 _anchorPoint = Vector2.Zero; // Backing for scroll offsets
@@ -565,12 +568,14 @@ public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 				{
 					visual._flags &= ~VisualFlags.PaintDirty;
 
-					var recordingCanvas = _recorder.BeginRecording(InfiniteClipRect);
+					var recorder = _recorderPool.Allocate();
+					var recordingCanvas = recorder.BeginRecording(InfiniteClipRect);
 					_factory.CreateInstance(visual, recordingCanvas, ref session.RootTransform, session.Opacity, session.Damage, out var recorderSession);
 					// To debug what exactly gets repainted, replace the following line with `Paint(in session);`
 					visual._ownContentPath = visual.Paint(in recorderSession);
 
-					var picture = UnoSkiaApi.sk_picture_recorder_end_recording(_recorder.Handle);
+					var picture = UnoSkiaApi.sk_picture_recorder_end_recording(recorder.Handle);
+					_recorderPool.Free(recorder);
 					UnoSkiaApi.sk_refcnt_safe_unref(visual._picture);
 					visual._picture = picture;
 				}
