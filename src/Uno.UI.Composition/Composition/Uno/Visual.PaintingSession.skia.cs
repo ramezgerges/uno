@@ -11,7 +11,7 @@ public partial class Visual
 {
 	private interface IPrivateSessionFactory
 	{
-		void CreateInstance(Visual visual, IDrawingSession drawingSession, ref Matrix4x4 rootTransform, float opacity, DamageRegion? damage, Visual? relativeTo, out PaintingSession session);
+		void CreateInstance(Visual visual, IDrawingSession drawingSession, ref Matrix4x4 rootTransform, float opacity, DamageRegion? damage, ref Matrix4x4 relativeMatrix, out PaintingSession session);
 	}
 
 	/// <summary>
@@ -22,19 +22,19 @@ public partial class Visual
 		// This dance is done to make it so that only Visual can create a PaintingSession
 		public readonly struct SessionFactory : IPrivateSessionFactory
 		{
-			void IPrivateSessionFactory.CreateInstance(Visual visual, IDrawingSession drawingSession, ref Matrix4x4 rootTransform, float opacity, DamageRegion? damage, Visual? relativeTo, out PaintingSession session)
+			void IPrivateSessionFactory.CreateInstance(Visual visual, IDrawingSession drawingSession, ref Matrix4x4 rootTransform, float opacity, DamageRegion? damage, ref Matrix4x4 relativeMatrix, out PaintingSession session)
 			{
-				session = new PaintingSession(visual, drawingSession, ref rootTransform, opacity, damage, relativeTo);
+				session = new PaintingSession(visual, drawingSession, ref rootTransform, opacity, damage, ref relativeMatrix);
 			}
 		}
 
-		private PaintingSession(Visual visual, IDrawingSession drawingSession, ref Matrix4x4 rootTransform, float opacity, DamageRegion? damage, Visual? relativeTo)
+		private PaintingSession(Visual visual, IDrawingSession drawingSession, ref Matrix4x4 rootTransform, float opacity, DamageRegion? damage, ref Matrix4x4 relativeMatrix)
 		{
 			Session = drawingSession;
 			RootTransform = ref rootTransform;
 			Opacity = opacity;
 			Damage = damage;
-			RelativeTo = relativeTo;
+			RelativeMatrix = ref relativeMatrix;
 
 			_saveCount = Session.Save();
 		}
@@ -47,9 +47,11 @@ public partial class Visual
 		/// <summary>The transform matrix to the root visual of this drawing session (which isn't necessarily the identity matrix due to scaling (DPI) and/or RenderTargetBitmap.</summary>
 		public readonly ref Matrix4x4 RootTransform;
 
-		/// <summary>When set, a visual draws under the transforms between this ancestor and itself, then <see cref="RootTransform"/>,
-		/// instead of under its TotalMatrix: the ancestor's TotalMatrix has no inverse to take back out (it flattens Z).</summary>
-		public readonly Visual? RelativeTo;
+		/// <summary>When set, this session's own visual draws under this matrix - its transform relative to the recording
+		/// origin - then <see cref="RootTransform"/>, instead of under its TotalMatrix. Used where the origin's TotalMatrix
+		/// has no inverse to take back out (it flattens Z). Each visual composes its own from its parent's with one
+		/// multiply, so no inverse and no walk up the tree are needed.</summary>
+		public readonly ref Matrix4x4 RelativeMatrix;
 
 		public readonly float Opacity;
 

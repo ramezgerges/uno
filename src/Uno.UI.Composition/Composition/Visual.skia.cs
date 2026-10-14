@@ -51,15 +51,18 @@ public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 	// Records the subtree in the visual's own space: child.Render reapplies each TotalMatrix, and the inverse (stored in
 	// inverse, which must outlive the session) takes the visual's own back out. A TotalMatrix that flattens Z has no
 	// inverse, so the children then compose the transforms below the visual instead, which replays under any matrix.
-	private static void CreateRecordingSession(Visual visual, ICommandRecorder recording, ref Matrix4x4 inverse, in PaintingSession session, out PaintingSession recordingSession)
+	private static void CreateRecordingSession(Visual visual, ICommandRecorder recording, ref Matrix4x4 inverse, ref Matrix4x4 relative, in PaintingSession session, out PaintingSession recordingSession)
 	{
 		if (Matrix4x4.Invert(visual.TotalMatrix, out inverse))
 		{
-			_factory.CreateInstance(visual, recording, ref inverse, session.Opacity, session.Damage, relativeTo: null, out recordingSession);
+			_factory.CreateInstance(visual, recording, ref inverse, session.Opacity, session.Damage, ref Unsafe.NullRef<Matrix4x4>(), out recordingSession);
 		}
 		else
 		{
-			_factory.CreateInstance(visual, recording, ref Unsafe.NullRef<Matrix4x4>(), session.Opacity, session.Damage, relativeTo: visual, out recordingSession);
+			// The recorded visual is the origin, so its own matrix relative to it is the identity. Each descendant
+			// composes its own from its parent's, one multiply each.
+			relative = Matrix4x4.Identity;
+			_factory.CreateInstance(visual, recording, ref Unsafe.NullRef<Matrix4x4>(), session.Opacity, session.Damage, ref relative, out recordingSession);
 		}
 	}
 
@@ -315,19 +318,6 @@ public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 	// TotalMatrix without the parent's: this visual's own transform and position within its parent.
 	private protected Matrix4x4 LocalMatrix => GetTransform() * GetOffsetMatrix();
 
-	// The transforms between an ancestor and this visual, composed from their local matrices. This exists even when the
-	// ancestor's TotalMatrix flattens Z and has no inverse to take back out of this visual's.
-	private Matrix4x4 GetMatrixRelativeTo(Visual ancestor)
-	{
-		var matrix = Matrix4x4.Identity;
-		for (var visual = this; visual is not null && visual != ancestor; visual = visual.Parent)
-		{
-			matrix *= visual.LocalMatrix;
-		}
-
-		return matrix;
-	}
-
 	private Matrix4x4 GetOffsetMatrix()
 	{
 		var totalOffset = GetTotalOffset();
@@ -498,6 +488,7 @@ public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 		// an initial global transformation set (e.g. if the renderer sets scaling for dpi or we're rendering from a VisualSurface)
 		var initialTransform = drawingSession.TotalMatrix;
 		Visual? relativeTo = null;
+		var relative = Matrix4x4.Identity;
 		if (Parent is { } parent)
 		{
 			if (Matrix4x4.Invert(parent.TotalMatrix, out var invertedParentTotalMatrix))
@@ -506,8 +497,10 @@ public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 			}
 			else
 			{
-				// A parent that flattens Z has no inverse: compose the transforms below it instead.
+				// A parent that flattens Z has no inverse. The parent is the origin, so this visual's matrix
+				// relative to it is simply its own.
 				relativeTo = parent;
+				relative = Matrix4x4.Identity;
 			}
 		}
 
@@ -534,7 +527,7 @@ public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 						  ref initialTransform.IsIdentity ? ref Unsafe.NullRef<Matrix4x4>() : ref initialTransform,
 						  opacity: 1.0f,
 						  damage,
-						  relativeTo,
+						  ref relativeTo is null ? ref Unsafe.NullRef<Matrix4x4>() : ref relative,
 						  out var session);
 
 		using (session)
@@ -616,7 +609,8 @@ public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 		_shadowSubtreeChangedThisFrame = (_flags & VisualFlags.ShadowCacheInvalid) != 0;
 		_flags &= ~VisualFlags.ShadowCacheInvalid;
 
-		CreateLocalSession(in parentSession, out var session);
+		var relative = default(Matrix4x4);
+		CreateLocalSession(in parentSession, ref relative, out var session);
 
 		using (session)
 		{
@@ -647,7 +641,8 @@ public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 				{
 					var recording = CreateRecording(parentSession.Session.Factory);
 					var rootTransform = Matrix4x4.Identity;
-					CreateRecordingSession(this, recording, ref rootTransform, session, out var childSession);
+					var shadowRelative = Matrix4x4.Identity;
+					CreateRecordingSession(this, recording, ref rootTransform, ref shadowRelative, session, out var childSession);
 					using (childSession)
 					{
 						PaintStep(this, childSession, clipChanged, clipBounds);
@@ -727,7 +722,7 @@ public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 					visual._flags &= ~VisualFlags.PaintDirty;
 
 					var recording = CreateRecording(session.Session.Factory);
-					_factory.CreateInstance(visual, recording, ref session.RootTransform, session.Opacity, session.Damage, session.RelativeTo, out var recorderSession);
+					_factory.CreateInstance(visual, recording, ref session.RootTransform, session.Opacity, session.Damage, ref session.RelativeMatrix, out var recorderSession);
 					// To debug what exactly gets repainted, replace the following line with `Paint(in session);`
 					visual.Paint(in recorderSession);
 
@@ -796,7 +791,8 @@ public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 			{
 				var recording = CreateRecording(session.Session.Factory);
 				var rootTransform = Matrix4x4.Identity;
-				CreateRecordingSession(visual, recording, ref rootTransform, session, out var childSession);
+				var relative = Matrix4x4.Identity;
+				CreateRecordingSession(visual, recording, ref rootTransform, ref relative, session, out var childSession);
 				using (childSession)
 				{
 					foreach (var child in visual.GetChildrenInRenderOrder())
@@ -1361,9 +1357,19 @@ public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 	/// <summary>
 	/// Creates a new <see cref="PaintingSession"/> set up with the local coordinates and opacity.
 	/// </summary>
-	private void CreateLocalSession(in PaintingSession parentSession, out PaintingSession session)
+	private void CreateLocalSession(in PaintingSession parentSession, ref Matrix4x4 relative, out PaintingSession session)
 	{
 		ref var rootTransform = ref parentSession.RootTransform;
+		ref var parentRelative = ref parentSession.RelativeMatrix;
+		var isRelative = !Unsafe.IsNullRef(ref parentRelative);
+		if (isRelative)
+		{
+			// The parent already holds its own matrix relative to the recording origin, so this is one multiply
+			// rather than a walk back up to that origin.
+			relative = LocalMatrix * parentRelative;
+		}
+
+		ref var relativeRef = ref isRelative ? ref relative : ref Unsafe.NullRef<Matrix4x4>();
 
 		var opacity = Opacity == 1.0f ? parentSession.Opacity : parentSession.Opacity * Opacity;
 
@@ -1373,7 +1379,7 @@ public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 			opacity = 1.0f;
 		}
 
-		_factory.CreateInstance(this, parentSession.Session, ref rootTransform, opacity, parentSession.Damage, parentSession.RelativeTo, out session);
+		_factory.CreateInstance(this, parentSession.Session, ref rootTransform, opacity, parentSession.Damage, ref relativeRef, out session);
 
 		if ((_flags & VisualFlags.MatrixDirty) != 0 || !_totalMatrix.isLocalMatrixIdentity)
 		{
@@ -1396,22 +1402,23 @@ public partial class Visual : global::Microsoft.UI.Composition.CompositionObject
 				diff.M21 * diff.M21 + diff.M22 * diff.M22 + diff.M23 * diff.M23 + diff.M24 * diff.M24 +
 				diff.M31 * diff.M31 + diff.M32 * diff.M32 + diff.M33 * diff.M33 + diff.M34 * diff.M34 +
 				diff.M41 * diff.M41 + diff.M42 * diff.M42 + diff.M43 * diff.M43 + diff.M44 * diff.M44;
-			Debug.Assert(Unsafe.IsNullRef(ref rootTransform) && parentSession.RelativeTo is null
+			Debug.Assert(Unsafe.IsNullRef(ref rootTransform) && !isRelative
 				? actual == TotalMatrix
 				: CompositionMathHelpers.IsCloseRealZero(frobeniusSquared, 1e-5f));
 		}
 #endif
 	}
 
-	// The matrix this visual draws under in a session: its TotalMatrix, or the transforms below the session's RelativeTo
-	// ancestor, then the session's RootTransform.
+	// The matrix this visual draws under: its TotalMatrix, or - when the session carries one - its own LocalMatrix
+	// composed onto the parent's matrix relative to the recording origin, then the session's RootTransform.
 	private Matrix4x4 GetSessionMatrix(in PaintingSession session)
 	{
 		// Read either way: it refreshes the local-identity flag CreateLocalSession tests.
 		var matrix = TotalMatrix;
-		if (session.RelativeTo is { } ancestor)
+		ref var parentRelative = ref session.RelativeMatrix;
+		if (!Unsafe.IsNullRef(ref parentRelative))
 		{
-			matrix = GetMatrixRelativeTo(ancestor);
+			matrix = LocalMatrix * parentRelative;
 		}
 
 		ref var rootTransform = ref session.RootTransform;
